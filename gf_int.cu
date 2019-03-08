@@ -16,9 +16,9 @@ __global__ void test(gf_int8_t *_a, gf_int8_t *_b)
 	auto r3 = clmul_most(a, b);
 
 	if (threadIdx.z == 0) {
-		printf("%llu\n", static_cast<uint64_t>(r1.getData()));
-		printf("%llu\n", static_cast<uint64_t>(r2.getData()));
-		printf("%llu\n", static_cast<uint64_t>(r3.getData()));
+		printf("0x%llx\n", static_cast<uint64_t>(r1.getData()));
+		printf("0x%llx\n", static_cast<uint64_t>(r2.getData()));
+		printf("0x%llx\n", static_cast<uint64_t>(r3.getData()));
 	}
 
 }

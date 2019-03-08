@@ -14,10 +14,10 @@ all: $(EXEC)
 run: $(EXEC)
 	./$(EXEC)
 
+
+
 $(EXEC): $(OBJS)
 	$(CC) $^ -o $@ $(CPPFLAGS)
-
-
 
 gf_int.o: gf_int.cu gf_int.h
 	$(CC) -c $< -o $@ $(CPPFLAGS)
