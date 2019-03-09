@@ -72,67 +72,77 @@ public:
     }
 
 public:
-    __host__ __device__ xint(): xint(0) {}
+    __host__ __device__ constexpr xint(): xint(0) {}
 
     // VA: raw value's [0...(BITS-1)]
     // IA: Undefined
-    __host__ __device__ xint(const raw_t &raw_data): data(raw_data) {}
+    __host__ __device__ constexpr xint(const raw_t &raw_data): data(raw_data) {}
+
+    /*__host__ __device__ constexpr xint & operator=(const raw_t &raw_data) {
+        data = raw_data;
+        return *this;
+    }*/
 
     // VA: old xint's value
     // IA: Undefined
-    __host__ __device__ xint(const xint &old): data(old.data) {}
+    __host__ __device__ constexpr xint(const xint &old): data(old.data) {}
+
+    /*__host__ __device__ constexpr xint & operator=(const xint &old) {
+        data = old.raw();
+        return *this;
+    }*/
 
     // VA: when become longer, is padding 0s + old value
     //     OR cutted old value + keeped part
     // IA: Undefined
     template <int TO_BITS>
-    __host__ __device__ xint<TO_BITS> toBits() const {
+    __host__ __device__ constexpr explicit operator xint<TO_BITS>() const {
         using new_raw_t = typename xint<TO_BITS>::raw_t;
         return xint<TO_BITS>( static_cast<new_raw_t>(value()) );
     }
 
-    __host__ __device__ xint & operator+=(const xint &rhs) {
+    __host__ __device__ constexpr xint & operator+=(const xint &rhs) {
         data += rhs.raw();
         return *this;
     }
 
-    __host__ __device__ xint & operator*=(const xint &rhs) {
+    __host__ __device__ constexpr xint & operator*=(const xint &rhs) {
         data *= rhs.raw();
         return *this;
     }
 
-    __host__ __device__ xint & operator<<=(const int &rhs) {
+    __host__ __device__ constexpr xint & operator<<=(const int &rhs) {
         data <<= rhs;
         return *this;
     }
 
-    __host__ __device__ xint & operator>>=(const int &rhs) {
+    __host__ __device__ constexpr xint & operator>>=(const int &rhs) {
         data = this->value() >> rhs;
         return *this;
     }
 
-    __host__ __device__ xint & operator&=(const xint &rhs) {
+    __host__ __device__ constexpr xint & operator&=(const xint &rhs) {
         data &= rhs.raw();
         return *this;
     }
 
-    __host__ __device__ xint & operator|=(const xint &rhs) {
+    __host__ __device__ constexpr xint & operator|=(const xint &rhs) {
         data |= rhs.raw();
         return *this;
     }
 
-    __host__ __device__ xint & operator^=(const xint &rhs) {
+    __host__ __device__ constexpr xint & operator^=(const xint &rhs) {
         data ^= rhs.raw();
         return *this;
     }
 
-    __host__ __device__ explicit operator bool() const {
+    __host__ __device__ constexpr explicit operator bool() const {
         return value();
     }
 };
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator+(const xint<BITS> &lhs, const xint<BITS> &rhs)
+__host__ __device__ constexpr xint<BITS> operator+(const xint<BITS> &lhs, const xint<BITS> &rhs)
 {
     xint<BITS> result(lhs);
     result += rhs;
@@ -140,7 +150,7 @@ __host__ __device__ xint<BITS> operator+(const xint<BITS> &lhs, const xint<BITS>
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator*(const xint<BITS> &lhs, const xint<BITS> &rhs)
+__host__ __device__ constexpr xint<BITS> operator*(const xint<BITS> &lhs, const xint<BITS> &rhs)
 {
     xint<BITS> result(lhs);
     result *= rhs;
@@ -148,7 +158,7 @@ __host__ __device__ xint<BITS> operator*(const xint<BITS> &lhs, const xint<BITS>
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator<<(const xint<BITS> &lhs, const int &rhs)
+__host__ __device__ constexpr xint<BITS> operator<<(const xint<BITS> &lhs, const int &rhs)
 {
     xint<BITS> result(lhs);
     result <<= rhs;
@@ -156,7 +166,7 @@ __host__ __device__ xint<BITS> operator<<(const xint<BITS> &lhs, const int &rhs)
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator>>(const xint<BITS> &lhs, const int &rhs)
+__host__ __device__ constexpr xint<BITS> operator>>(const xint<BITS> &lhs, const int &rhs)
 {
     xint<BITS> result(lhs);
     result >>= rhs;
@@ -164,7 +174,7 @@ __host__ __device__ xint<BITS> operator>>(const xint<BITS> &lhs, const int &rhs)
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator&(const xint<BITS> &lhs, const xint<BITS> &rhs)
+__host__ __device__ constexpr xint<BITS> operator&(const xint<BITS> &lhs, const xint<BITS> &rhs)
 {
     xint<BITS> result(lhs);
     result &= rhs;
@@ -172,7 +182,7 @@ __host__ __device__ xint<BITS> operator&(const xint<BITS> &lhs, const xint<BITS>
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator|(const xint<BITS> &lhs, const xint<BITS> &rhs)
+__host__ __device__ constexpr xint<BITS> operator|(const xint<BITS> &lhs, const xint<BITS> &rhs)
 {
     xint<BITS> result(lhs);
     result |= rhs;
@@ -180,7 +190,7 @@ __host__ __device__ xint<BITS> operator|(const xint<BITS> &lhs, const xint<BITS>
 }
 
 template <int BITS>
-__host__ __device__ xint<BITS> operator^(const xint<BITS> &lhs, const xint<BITS> &rhs)
+__host__ __device__ constexpr xint<BITS> operator^(const xint<BITS> &lhs, const xint<BITS> &rhs)
 {
     xint<BITS> result(lhs);
     result ^= rhs;

@@ -49,28 +49,19 @@ __device__ inline T a_mul_bi_most_half(T a, T b, int digit) {
 
 
 
-/*template <int BITS>
-struct gf_constants {
-	using typename std_t = gf_underlying<BITS>;
-	using typename ext_t = gf_underlying< BITS*2 >::type;
+// Declaration: Irreducible Polynomials
 
-	static const ext_t poly_g;
-	static const std_t g_star;
-	static const ext_t q_plus =
-		(static_cast<ext_t>(1) << BITS) |
-		polynomial_divide<BITS>( gf_mask<BITS*2>(g, BITS) );
+template <int BITS>
+struct constepxr_irreducible;
+
+// Defination: Irreducible Polynomials
+
+template <>
+struct constepxr_irreducible<4> {
+	static constexpr xint<4>::raw_t value() {
+		return 0x13;
+	}
 };
-
-template <int BITS, using typename T = gf_constants::ext_t>
-constexpr T polynomial_divide(T poly, int digit = BITS-1) {
-	bool flag = ((1 << (BITS+digit)) & poly) != 0;
-	poly = flag ? (poly ^ (g << digit)) : poly;
-	return (digit < BITS) ? 0 : (
-		(flag ? (1<<digit) : 0) | polynomial_divide(poly, digit-1)
-	);
-}*/
-
-
 
 
 
@@ -87,16 +78,36 @@ public:
 private:
 	std_t data;
 
-public:
-	gf_int() = default;
-	__device__ gf_int(unsafe_t unsafe_data): data(unsafe_data) {}
-	__device__ gf_int(const gf_int &old): data(old.data) {}
+private:
+	static constexpr ext_t polynomial_divide(ext_t poly, int digit = BITS-1) {
+		return ((((static_cast<ext_t>(1) << (BITS+digit)) & poly) != 0) ? (static_cast<ext_t>(1)<<digit) : 0) |
+			polynomial_divide(poly ^ (irred_g * ((poly >> BITS) & (static_cast<ext_t>(1) << digit))), digit-1);
 
-	__device__ unsafe_t value() const {
+		/*constexpr bool flag = ((static_cast<ext_t>(1) << (BITS+digit)) & poly) != 0;
+		poly = flag ? (poly ^ (irred_g << digit)) : poly;
+		return (digit < BITS) ? 0 : (
+			(flag ? (static_cast<ext_t>(1)<<digit) : 0) | polynomial_divide(poly, digit-1)
+		);*/
+	}
+public:
+	static constexpr ext_t irred_g = constepxr_irreducible<BITS>::value();
+	static constexpr std_t g_star = static_cast<std_t>(irred_g);
+	static constexpr ext_t q_plus = (static_cast<ext_t>(1) << BITS) |
+		polynomial_divide(irred_g << BITS);
+
+	__device__ unsafe_t test() const {
+		return irred_g.value();
+	}
+
+public:
+	__host__ __device__ constexpr gf_int(unsafe_t unsafe_data): data(unsafe_data) {}
+	__host__ __device__ constexpr gf_int(const gf_int &old): data(old.data) {}
+
+	__device__ constexpr unsafe_t value() const {
 		return data.value();
 	}
 
-	__device__ gf_int & operator+=(const gf_int &rhs) {
+	__device__ constexpr gf_int & operator+=(const gf_int &rhs) {
 		data ^= rhs.data;
 		return *this;
 	}
@@ -139,7 +150,7 @@ public:
 };
 
 template <int BITS>
-__device__ gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
+__device__ constexpr gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
 {
 	gf_int<BITS> result(lhs);
 	result += rhs;

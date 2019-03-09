@@ -1,7 +1,7 @@
 
 CC = nvcc
 
-CPPFLAGS += -std=c++11
+CPPFLAGS += -std=c++14
 
 EXEC = exec_gf
 OBJS = main.o
@@ -19,7 +19,7 @@ run: $(EXEC)
 $(EXEC): $(OBJS)
 	$(CC) $^ -o $@ $(CPPFLAGS)
 
-main.o: main.cu gf_int.h
+main.o: main.cu gf_int.h xint.h
 	$(CC) -c $< -o $@ $(CPPFLAGS)
 
 
