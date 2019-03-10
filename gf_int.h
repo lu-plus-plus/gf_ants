@@ -1,6 +1,9 @@
 #include <cstdint>
 #include <type_traits>
 
+#include <iostream>
+#include <iomanip>
+
 template <bool IF>
 using bool_constant = std::integral_constant<bool, IF>;
 
@@ -98,6 +101,14 @@ template <int BITS>
 struct constepxr_irreducible;
 
 
+template <int BITS> class gf_int;
+
+template <int BITS>
+__host__ __device__ constexpr gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
+template <int BITS>
+__device__ gf_int<BITS> clmul_least(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
+template <int BITS>
+__device__ gf_int<BITS> clmul_most(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
 
 template <int BITS>
 class gf_int
@@ -125,6 +136,7 @@ public:
 		// Mask<>() to avoid integer overflow warning
 
 public:
+	__host__ constexpr gf_int(): memory(0) {}
 	__host__ __device__ constexpr gf_int(raw_t raw_memory): memory(raw_memory) {}
 	__host__ __device__ constexpr gf_int(const gf_int &old): memory(old.memory) {}
 
@@ -169,7 +181,36 @@ public:
 	}
 
 	// Galois Field Multiplication
-	__device__ gf_int & gf_muled_by(const gf_int &rhs);
+	__device__ gf_int & operator*(const gf_int &rhs) {
+		using raw_t = typename gf_int<BITS>::raw_t;
+		
+		gf_int<BITS> c_least = clmul_least(*this, rhs);
+		gf_int &c = *this;
+		c.clmuled_most_by(rhs);
+
+		c += clmul_most<BITS>(c, mask<BITS>(gf_int<BITS>::q_plus));
+		// The most significant bit of q_plus is always 1.
+		// So the result should be:
+		// (q_plus[0...BITS-1] * c)'s most significant part, PLUS a copy of c.
+
+		c.clmuled_least_by(gf_int<BITS>::g_star);
+
+		c += c_least;
+		return c;
+	}
+
+	__device__ gf_int inverse() const {
+		gf_int c(*this);
+		
+		for (int i = 1; i < BITS; ++i) {
+			// c -> c^2 + x
+			c *= c;
+			c *= *this; 
+		}
+
+		return c;
+	}
+
 };
 
 template <int BITS>
@@ -197,20 +238,19 @@ __device__ gf_int<BITS> clmul_most(const gf_int<BITS> &lhs, const gf_int<BITS> &
 }
 
 template <int BITS>
-__device__ gf_int<BITS> gf_mul(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
+__device__ gf_int<BITS> operator*(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
 {
-	using raw_t = typename gf_int<BITS>::raw_t;
-	gf_int<BITS> c = clmul_most(lhs, rhs);
-	gf_int<BITS> c_least = clmul_least(lhs, rhs);
+	gf_int<BITS> result(lhs);
+	result *= rhs;
+	return result;
+}
 
-	c += clmul_most<BITS>(c, mask<BITS>(gf_int<BITS>::q_plus));
-	// The most significant bit of q_plus is always 1.
-	// So the result should be:
-	// (q_plus[0...BITS-1] * c)'s most significant part, PLUS a copy of c.
-
-	c.clmuled_least_by(gf_int<BITS>::g_star);
-
-	return c + c_least;
+template <int BITS>
+__host__ std::ostream & operator<<(std::ostream &os, const gf_int<BITS> &rhs)
+{
+	return os << std::setfill('0')
+		<< std::setw( (BITS/4 >= 1) ? (BITS/4) : 1 )
+		<< +rhs.value();
 }
 
 
