@@ -63,12 +63,10 @@ struct reduction< BITS, bool_constant<is_power_of_2(BITS) == false> > {
 
 
 
-template <int BITS>
-__host__ __device__ inline constexpr
-typename gf_raw<BITS>::type mask(const typename gf_raw<BITS>::type memory) {
-	using T = typename gf_raw<BITS>::type;
+template <int BITS, typename T>
+__host__ __device__ inline constexpr T mask(const T memory) {
 	constexpr int raw_len = sizeof(T) * 8;
-    constexpr T mask_bits = static_cast<T>(-1) >> (raw_len - BITS);
+    constexpr T mask_bits = static_cast<T>(-1) >> ((raw_len-BITS > 0) ? raw_len-BITS : 0);
 	return memory & mask_bits;
 }
 
@@ -98,11 +96,6 @@ __host__ __device__ inline typename gf_raw<BITS>::type split_most_result
 
 template <int BITS>
 struct constepxr_irreducible;
-
-template <>
-struct constepxr_irreducible<4> {
-	static constexpr typename gf_raw<4 * 2>::type polynomial = 0x13;
-};
 
 
 
@@ -210,14 +203,30 @@ __device__ gf_int<BITS> gf_mul(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
 	gf_int<BITS> c = clmul_most(lhs, rhs);
 	gf_int<BITS> c_least = clmul_least(lhs, rhs);
 
-	c += clmul_most<BITS>(c, gf_int<BITS>::q_plus);
-	// The most significant bit of q_plus is always 1,
-	// so we add a copy of c all the time.
+	c += clmul_most<BITS>(c, mask<BITS>(gf_int<BITS>::q_plus));
+	// The most significant bit of q_plus is always 1.
+	// So the result should be:
+	// (q_plus[0...BITS-1] * c)'s most significant part, PLUS a copy of c.
 
 	c.clmuled_least_by(gf_int<BITS>::g_star);
 
 	return c + c_least;
 }
+
+
+
+template <>
+struct constepxr_irreducible<4> {
+	static constexpr typename gf_int<4>::ext_t polynomial = 0x13;
+};
+template <>
+struct constepxr_irreducible<5> {
+	static constexpr typename gf_int<5>::ext_t polynomial = 0x25;
+};
+template <>
+struct constepxr_irreducible<8> {
+	static constexpr typename gf_int<8>::ext_t polynomial = 0x11B;
+};
 
 
 

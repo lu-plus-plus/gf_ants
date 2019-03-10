@@ -19,7 +19,7 @@ run: $(EXEC)
 $(EXEC): $(OBJS)
 	$(CC) $^ -o $@ $(CPPFLAGS)
 
-main.o: main.cu gf_int.h xint.h
+main.o: main.cu gf_int.h
 	$(CC) -c $< -o $@ $(CPPFLAGS)
 
 
