@@ -19,7 +19,7 @@ run: $(EXEC)
 $(EXEC): $(OBJS)
 	$(CC) $^ -o $@ $(CPPFLAGS)
 
-main.o: main.cu gf_int.h cuder.h
+main.o: main.cu cuder.h gf_int.h gf_matrix.h
 	$(CC) -c $< -o $@ $(CPPFLAGS)
 
 

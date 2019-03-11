@@ -4,6 +4,10 @@
 #include <iostream>
 #include <iomanip>
 
+constexpr int CURRENT_BITS = 8;
+constexpr int BLOCK_DIM_X = 16;
+constexpr int BLOCK_DIM_Y = (1024 / CURRENT_BITS / BLOCK_DIM_X);
+
 template <bool IF>
 using bool_constant = std::integral_constant<bool, IF>;
 
@@ -154,7 +158,8 @@ public:
 		gf_int &lhs = *this;
 	
 		int digit = threadIdx.z;
-		__shared__ raw_t c[BITS];
+		__shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y][BITS];
+		auto &c = all_c[threadIdx.x][threadIdx.y];
 
 		c[digit] = f(lhs.memory, rhs.memory, digit);
 		__syncthreads();
@@ -181,32 +186,36 @@ public:
 	}
 
 	// Galois Field Multiplication
-	__device__ gf_int & operator*(const gf_int &rhs) {
-		using raw_t = typename gf_int<BITS>::raw_t;
-		
-		gf_int<BITS> c_least = clmul_least(*this, rhs);
+	__device__ gf_int & operator*=(const gf_int &rhs) {
+		gf_int c_least = clmul_least(*this, rhs);
 		gf_int &c = *this;
 		c.clmuled_most_by(rhs);
 
-		c += clmul_most<BITS>(c, mask<BITS>(gf_int<BITS>::q_plus));
+		c += clmul_most<BITS>(c, mask<BITS>(q_plus));
 		// The most significant bit of q_plus is always 1.
 		// So the result should be:
 		// (q_plus[0...BITS-1] * c)'s most significant part, PLUS a copy of c.
 
-		c.clmuled_least_by(gf_int<BITS>::g_star);
+		c.clmuled_least_by(g_star);
 
 		c += c_least;
-		return c;
+		return *this;
 	}
 
-	__device__ gf_int inverse() const {
+	__device__ gf_int inverse() {
+		if ((*this).value() == 0)
+			return gf_int(0);
+
 		gf_int c(*this);
 		
-		for (int i = 1; i < BITS; ++i) {
-			// c -> c^2 + x
+		for (int i = 1; i < BITS-1; ++i) {
+			// c := c^2 + x
 			c *= c;
-			c *= *this; 
+			c *= (*this);
 		}
+		c *= c;
+		// x^(2^n-2) = x^(-1)
+		// x^(2^n) = x^(1) as a cyclic group
 
 		return c;
 	}

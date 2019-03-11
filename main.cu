@@ -1,38 +1,57 @@
 
-#include "gf_int.h"
+#include "gf_matrix.h"
 #include "cuder.h"
 
-constexpr int BITS = 8;
-constexpr int N = 256;
-using gf_test_t = gf_int<BITS>;
+constexpr int M = 20;
+constexpr int N = M*2;
+
+using gf_int_t = gf_int<CURRENT_BITS>;
+using matrix_t = gf_matrix<CURRENT_BITS, M, N>;
 
 
 
-__global__ void CalcuInverse(gf_test_t *host_matrix)
-{
-	for (uint32_t i = 1; i < 256; ++i) {
-		for (uint32_t j = 1; j < 256; ++j) {
-			if ( (gf_test_t(i) * gf_test_t(j)).value() == gf_test_t(1).value() ) {
-				host_matrix[i] = gf_test_t(j);
-				break;
-			}
-		}
-	}
-}
-
-gf_test_t host_matrix[N];
+matrix_t h_mat;
 
 int main(void)
 {
-	cuder<gf_test_t> device_matrix(make_cuder<gf_test_t>(N));
-	cudaMemcpy(device_matrix.toKernel(), host_matrix, sizeof(host_matrix), cudaMemcpyHostToDevice);
+	cuder<matrix_t> d_mat_ptr(make_cuder<matrix_t>());
+	cuder<gf_int_t> d_coeff_ptr(make_cuder<gf_int_t>(M));
 
-	CalcuInverse<<<dim3(1,1,1), dim3(1,1,BITS)>>>(device_matrix.toKernel());
+	for (uint32_t i = 0; i < M; ++i) {
+		for (uint32_t j = i; j < M; ++j) {
+			h_mat.data[i][j] = matrix_t::data_t(i + j + 1);
+		}
 
-	cudaMemcpy(host_matrix, device_matrix.toKernel(), sizeof(host_matrix), cudaMemcpyDeviceToHost);
-	for (int i = 0; i < 16; ++i) {
-		for (int j = 0; j < 16; ++j) {
-			std::cout << "0x" << std::hex << host_matrix[i * 16 + j] << ' ';
+		h_mat.data[i][i+M] = matrix_t::data_t(1);
+	}
+	/*for (uint32_t i = 0; i < M; ++i) {
+		for (uint32_t j = 0; j < M; ++j) {
+			std::cout << std::hex << h_mat.data[i][j] << ' ';
+		}
+		std::cout << std::endl;
+	}
+	std::cout << std::endl;*/
+	
+	cudaMemcpy(d_mat_ptr.toKernel(), &h_mat, sizeof(h_mat), cudaMemcpyHostToDevice);
+
+	check_inverse<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+		(d_mat_ptr.toKernel());
+
+	for (int num_pivot = 0; num_pivot < M; ++num_pivot) {
+		calcu_row_coeffs<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
+		
+		eliminate_rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
+	}
+
+	normalize_by_pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+		(d_mat_ptr.toKernel());
+	
+	cudaMemcpy(&h_mat, d_mat_ptr.toKernel(), sizeof(h_mat), cudaMemcpyDeviceToHost);
+	for (uint32_t i = 0; i < M; ++i) {
+		for (uint32_t j = M; j < N; ++j) {
+			std::cout << std::hex << h_mat.data[i][j] << ' ';
 		}
 		std::cout << std::endl;
 	}
