@@ -159,7 +159,7 @@ public:
 	}
 
 	__device__ gf_int & operator=(const gf_int &rhs) {
-		__syncthreads();
+		// __syncthreads();
 		memory = rhs.memory;
 		return *this;
 	}
@@ -173,11 +173,7 @@ public:
 		// Begin Critical Section
 		// Assumption 1: To threads in a bundle, all the accessible data are consistent
 
-		raw_t result = memory ^ rhs.memory;
-		
-		__syncthreads();
-
-		memory = result;
+		memory ^= rhs.memory;
 		__syncthreads();
 		// For any thread in bundle,
 		// no read and no write before writing this down.
@@ -193,11 +189,22 @@ public:
 	template <raw_t (*f_split)(const raw_t a, const raw_t b, const int digit)>
 	__device__ gf_int & clmuled_by(const gf_int &rhs) {
 		const gf_int &lhs = *this;
-		const int digit = threadIdx.z;
+		// const int digit = threadIdx.z;
 
-		__shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y][BITS];
+		// __shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y][BITS];
+		// auto &c = all_c[threadIdx.x][threadIdx.y];
+		__shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y];
 		auto &c = all_c[threadIdx.x][threadIdx.y];
 
+		c = raw_t(0);
+		for (int i = 0; i < BITS; ++i) {
+			c ^= f_split(lhs.memory, rhs.memory, i);
+		}
+
+		this->memory = c;
+		__syncthreads();
+
+/*
 		// ****************************************
 		// Begin Critical Section
 
@@ -218,7 +225,7 @@ public:
 
 		// End Critical Section
 		// ****************************************
-
+*/
 		return *this;
 	}
 

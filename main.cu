@@ -34,31 +34,31 @@ int main(void)
 	
 	cudaMemcpy(d_mat_ptr.toKernel(), &h_mat, sizeof(h_mat), cudaMemcpyHostToDevice);
 
-	Inverse_Precheck<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+	Inverse_Precheck<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
 		(d_mat_ptr.toKernel());
 	cudaDeviceSynchronize();
 
 	for (int num_pivot = 0; num_pivot < M; ++num_pivot) {
-		Calcu_Row_Coeffs<<<dim3(16), dim3(BLOCK_DIM_X, 1, CURRENT_BITS)>>>
+		Calcu_Row_Coeffs<<<dim3(16), dim3(BLOCK_DIM_X, 1, 1)>>>
 			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
 		cudaDeviceSynchronize();
 
-		Eliminate_Rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+		Eliminate_Rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
 			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
 		cudaDeviceSynchronize();
 	}
 
-	Normalize_By_Pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+	Normalize_By_Pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
 		(d_mat_ptr.toKernel());
 	cudaDeviceSynchronize();
 	
 	cudaMemcpy(&h_mat, d_mat_ptr.toKernel(), sizeof(h_mat), cudaMemcpyDeviceToHost);
-	/*for (uint32_t i = 0; i < M; ++i) {
+	for (uint32_t i = 0; i < M; ++i) {
 		for (uint32_t j = M; j < N; ++j) {
 			std::cout << std::hex << h_mat.data[i][j] << ' ';
 		}
 		std::cout << std::endl;
-	}*/
+	}
 
 	return 0;
 }
