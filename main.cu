@@ -2,7 +2,7 @@
 #include "gf_matrix.h"
 #include "cuder.h"
 
-constexpr int M = 20;
+constexpr int M = 1024;
 constexpr int N = M*2;
 
 using gf_int_t = gf_int<CURRENT_BITS>;
@@ -19,10 +19,10 @@ int main(void)
 
 	for (uint32_t i = 0; i < M; ++i) {
 		for (uint32_t j = i; j < M; ++j) {
-			h_mat.data[i][j] = matrix_t::data_t(i + j + 1);
+			h_mat.data[i][j].assigned(matrix_t::data_t(i + j + 1));
 		}
 
-		h_mat.data[i][i+M] = matrix_t::data_t(1);
+		h_mat.data[i][i+M].assigned(matrix_t::data_t(1));
 	}
 	/*for (uint32_t i = 0; i < M; ++i) {
 		for (uint32_t j = 0; j < M; ++j) {
@@ -34,27 +34,31 @@ int main(void)
 	
 	cudaMemcpy(d_mat_ptr.toKernel(), &h_mat, sizeof(h_mat), cudaMemcpyHostToDevice);
 
-	check_inverse<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+	Inverse_Precheck<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
 		(d_mat_ptr.toKernel());
+	cudaDeviceSynchronize();
 
 	for (int num_pivot = 0; num_pivot < M; ++num_pivot) {
-		calcu_row_coeffs<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+		Calcu_Row_Coeffs<<<dim3(16), dim3(BLOCK_DIM_X, 1, CURRENT_BITS)>>>
 			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
-		
-		eliminate_rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+		cudaDeviceSynchronize();
+
+		Eliminate_Rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
 			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
+		cudaDeviceSynchronize();
 	}
 
-	normalize_by_pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
+	Normalize_By_Pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, CURRENT_BITS)>>>
 		(d_mat_ptr.toKernel());
+	cudaDeviceSynchronize();
 	
 	cudaMemcpy(&h_mat, d_mat_ptr.toKernel(), sizeof(h_mat), cudaMemcpyDeviceToHost);
-	for (uint32_t i = 0; i < M; ++i) {
+	/*for (uint32_t i = 0; i < M; ++i) {
 		for (uint32_t j = M; j < N; ++j) {
 			std::cout << std::hex << h_mat.data[i][j] << ' ';
 		}
 		std::cout << std::endl;
-	}
+	}*/
 
 	return 0;
 }

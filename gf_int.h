@@ -4,12 +4,19 @@
 #include <iostream>
 #include <iomanip>
 
+
+
 constexpr int CURRENT_BITS = 8;
-constexpr int BLOCK_DIM_X = 16;
+
+constexpr int BLOCK_DIM_X = 8;
 constexpr int BLOCK_DIM_Y = (1024 / CURRENT_BITS / BLOCK_DIM_X);
+
+
 
 template <bool IF>
 using bool_constant = std::integral_constant<bool, IF>;
+
+
 
 constexpr bool in_closed_range(const int val, const int l, const int r)
 {
@@ -38,12 +45,6 @@ template <int BITS>
 struct gf_raw<BITS, bool_constant<in_closed_range(BITS, 33, 64)>> {
 	using type = uint64_t;
 };
-
-
-
-
-template <int BITS>
-class gf_int;
 
 
 
@@ -77,6 +78,8 @@ __host__ __device__ inline constexpr T mask(const T memory) {
 	return memory & mask_bits;
 }
 
+
+
 template <int BITS>
 __host__ __device__ inline constexpr
 typename gf_raw<BITS>::type right_shift_in(const typename gf_raw<BITS>::type memory, const int offset) {
@@ -94,7 +97,7 @@ __host__ __device__ inline typename gf_raw<BITS>::type split_least_result
 
 template <int BITS>
 __host__ __device__ inline typename gf_raw<BITS>::type split_most_result
-	(typename gf_raw<BITS>::type a, typename gf_raw<BITS>::type b, int digit) {
+	(const typename gf_raw<BITS>::type a, const typename gf_raw<BITS>::type b, const int digit) {
 	using T = typename gf_raw<BITS>::type;
 	return right_shift_in<BITS>(a, BITS-digit) * (right_shift_in<BITS>(b, digit) & static_cast<T>(1));
 }
@@ -105,7 +108,9 @@ template <int BITS>
 struct constepxr_irreducible;
 
 
-template <int BITS> class gf_int;
+
+template <int BITS>
+class gf_int;
 
 template <int BITS>
 __host__ __device__ constexpr gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
@@ -123,6 +128,12 @@ public:
 
 private:
 	raw_t memory;
+	// Reading [memory] directly is unsafe,
+	// because we never know what the leftmost bits are,
+	// after the unpredictable preceding operations.
+	// 
+	// When simply writing to [memory], it doesn't matter whether you mask the [memory] or not.
+	// But when reading, do it by value().
 
 private:
 	static constexpr ext_t polynomial_divide(const ext_t poly, const int digit) {
@@ -131,37 +142,66 @@ private:
 		return ( bit_pick ? (static_cast<ext_t>(1)<<digit) : 0 ) |
 			( (digit > 0) ? polynomial_divide(poly^addition, digit-1) : 0 );
 	}
-
 public:
 	static constexpr ext_t irred_g = constepxr_irreducible<BITS>::polynomial;
 	static constexpr raw_t g_star = static_cast<raw_t>( mask<BITS>(irred_g) );
 	static constexpr ext_t q_plus = (static_cast<ext_t>(1) << BITS)
 		| polynomial_divide(mask<BITS>(irred_g) << BITS, BITS - 1);
-		// Mask<>() to avoid integer overflow warning
+		// Use mask<>() to avoid integer overflow warning.
 
 public:
 	__host__ constexpr gf_int(): memory(0) {}
-	__host__ __device__ constexpr gf_int(raw_t raw_memory): memory(raw_memory) {}
+	__host__ __device__ constexpr gf_int(const raw_t raw_memory): memory(raw_memory) {}
 	__host__ __device__ constexpr gf_int(const gf_int &old): memory(old.memory) {}
 
 	__host__ __device__ constexpr raw_t value() const {
 		return mask<BITS>(memory);
 	}
 
-	__host__ __device__ constexpr gf_int & operator+=(const gf_int &rhs) {
-		memory ^= rhs.memory;
+	__device__ gf_int & operator=(const gf_int &rhs) {
+		__syncthreads();
+		memory = rhs.memory;
+		return *this;
+	}
+	__host__ gf_int & assigned(const gf_int &rhs) {
+		memory = rhs.memory;
 		return *this;
 	}
 
-	template <raw_t (*f)(raw_t a, raw_t b, int digit)>
+	__device__ gf_int & operator+=(const gf_int &rhs) {
+		// ****************************************
+		// Begin Critical Section
+		// Assumption 1: To threads in a bundle, all the accessible data are consistent
+
+		raw_t result = memory ^ rhs.memory;
+		
+		__syncthreads();
+
+		memory = result;
+		__syncthreads();
+		// For any thread in bundle,
+		// no read and no write before writing this down.
+		
+		// Assumption 1 is kept
+
+		// End Critical Section
+		// ****************************************
+
+		return *this;
+	}
+
+	template <raw_t (*f_split)(const raw_t a, const raw_t b, const int digit)>
 	__device__ gf_int & clmuled_by(const gf_int &rhs) {
-		gf_int &lhs = *this;
-	
-		int digit = threadIdx.z;
+		const gf_int &lhs = *this;
+		const int digit = threadIdx.z;
+
 		__shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y][BITS];
 		auto &c = all_c[threadIdx.x][threadIdx.y];
 
-		c[digit] = f(lhs.memory, rhs.memory, digit);
+		// ****************************************
+		// Begin Critical Section
+
+		c[digit] = f_split(lhs.memory, rhs.memory, digit);
 		__syncthreads();
 
 		// Warning: Better Reduction Algorithm?
@@ -173,8 +213,13 @@ public:
 			__syncthreads();
 		}
 
-		lhs.memory = c[0];
-		return lhs;
+		this->memory = c[0];
+		__syncthreads();
+
+		// End Critical Section
+		// ****************************************
+
+		return *this;
 	}
 
 	__device__ gf_int & clmuled_least_by(const gf_int &rhs) {
@@ -203,9 +248,6 @@ public:
 	}
 
 	__device__ gf_int inverse() {
-		if ((*this).value() == 0)
-			return gf_int(0);
-
 		gf_int c(*this);
 		
 		for (int i = 1; i < BITS-1; ++i) {

@@ -1,13 +1,13 @@
 #include "gf_int.h"
 
-#include <stdio.h>
+#include <cstdio>
 
 template <int BITS, int M, int N>
 class gf_matrix;
 
 template <int BITS, int M, int N>
-__global__ void check_inverse(gf_matrix<BITS,M,N> *_mat) {
-    auto &mat = *_mat;
+__global__ void Inverse_Precheck(gf_matrix<BITS,M,N> *_mat) {
+    const auto &data = (*_mat).data;
 
     int threadsPerBlock = (blockDim.x * blockDim.y);
     int absBlockIdx = blockIdx.x * gridDim.y + blockIdx.y;
@@ -22,31 +22,30 @@ __global__ void check_inverse(gf_matrix<BITS,M,N> *_mat) {
     }
 
     for (int i = absThreadIdx; i < M; i += absThreadsNumber) {
-        if (mat.data[i][i].value() == 0 && threadIdx.z == 0) {
+        if (data[i][i].value() == 0 && threadIdx.z == 0) {
             printf("Error: Pivot[%d][%d] is 0.\n", i, i);
         }
     }
 }
 
 template <int BITS, int M, int N>
-__global__ void calcu_row_coeffs(gf_matrix<BITS,M,N> *_mat,
+__global__ void Calcu_Row_Coeffs(gf_matrix<BITS,M,N> *_mat,
     gf_int<BITS> coeff[], const int num_pivot) {
     auto &data = (*_mat).data;
 
-    int threadsPerBlock = (blockDim.x * blockDim.y);
-    int absBlockIdx = blockIdx.x * gridDim.y + blockIdx.y;
-    int absThreadIdx = absBlockIdx * threadsPerBlock
-        + threadIdx.x * blockDim.y + threadIdx.y;
-    int absThreadsNumber = (gridDim.x * gridDim.y) * threadsPerBlock;
+    int begin_x = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride_x = blockDim.x * gridDim.x;
 
     auto pivot_inv = data[num_pivot][num_pivot].inverse();
-    for (int i = absThreadIdx; i < M; i += absThreadsNumber) {
+    for (int i = begin_x; i < M; i += stride_x) {
         coeff[i] = data[i][num_pivot] * pivot_inv;
     }
+
+    coeff[num_pivot] = 0;
 }
 
 template <int BITS, int M, int N>
-__global__ void eliminate_rows(gf_matrix<BITS,M,N> *_mat,
+__global__ void Eliminate_Rows(gf_matrix<BITS,M,N> *_mat,
     gf_int<BITS> coeff[], const int num_pivot) {
     auto &data = (*_mat).data;
 
@@ -56,16 +55,16 @@ __global__ void eliminate_rows(gf_matrix<BITS,M,N> *_mat,
     int stride_y = blockDim.y * gridDim.y;
 
     for (int i = begin_x; i < M; i += stride_x) {
-        if (i == num_pivot)
-            continue;
         for (int j = begin_y; j < N; j += stride_y) {
             data[i][j] += coeff[i] * data[num_pivot][j];
+            __syncthreads();
         }
+        __syncthreads();
     }
 }
 
 template <int BITS, int M, int N>
-__global__ void normalize_by_pivots(gf_matrix<BITS,M,N> *_mat) {
+__global__ void Normalize_By_Pivots(gf_matrix<BITS,M,N> *_mat) {
     auto &data = (*_mat).data;
 
     int begin_x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -77,7 +76,9 @@ __global__ void normalize_by_pivots(gf_matrix<BITS,M,N> *_mat) {
         auto pivot_inv = data[i][i].inverse();
         for (int j = M + begin_y; j < N; j += stride_y) {
             data[i][j] *= pivot_inv;
+            __syncthreads();
         }
+        __syncthreads();
     }
 }
 
