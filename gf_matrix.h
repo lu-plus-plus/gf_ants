@@ -86,7 +86,7 @@ __global__ void Eliminate_Rows(
     int stride_y = blockDim.y * gridDim.y;
 
     for (int i = begin_x; i < M; i += stride_x) {
-        for (int j = begin_y; j < M; j += stride_y) {
+        for (int j = begin_y + num_pivot; j < M; j += stride_y) {
             dataA[i][j] += coeff[i] * dataA[num_pivot][j];
         }
     }
