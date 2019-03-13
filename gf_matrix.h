@@ -88,6 +88,11 @@ __global__ void Eliminate_Rows(
     for (int i = begin_x; i < M; i += stride_x) {
         for (int j = begin_y; j < M; j += stride_y) {
             dataA[i][j] += coeff[i] * dataA[num_pivot][j];
+        }
+    }
+
+    for (int i = begin_x; i < M; i += stride_x) {
+        for (int j = begin_y; j <= num_pivot; j += stride_y) {
             dataB[i][j] += coeff[i] * dataB[num_pivot][j];
         }
     }

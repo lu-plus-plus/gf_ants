@@ -2,13 +2,13 @@
 #include "gf_matrix.h"
 #include "cuder.h"
 
-constexpr bool PRINT_VERBOSE = 1;
+constexpr bool PRINT_VERBOSE = 0;
 constexpr bool PRINT_INITIAL_VALUE = 0;
 constexpr bool PRINT_RESULT = 0;
 
 
 
-constexpr int M = 20000;
+constexpr int M = 2048;
 
 constexpr int BITS = 8;
 
