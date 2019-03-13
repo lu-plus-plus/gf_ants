@@ -2,7 +2,7 @@
 #include "gf_matrix.h"
 #include "cuder.h"
 
-constexpr int M = 1024;
+constexpr int M = 10240;
 constexpr int N = M*2;
 
 using gf_int_t = gf_int<CURRENT_BITS>;
@@ -34,9 +34,15 @@ int main(void)
 	
 	cudaMemcpy(d_mat_ptr.toKernel(), &h_mat, sizeof(h_mat), cudaMemcpyHostToDevice);
 
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
 	Inverse_Precheck<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
 		(d_mat_ptr.toKernel());
 	cudaDeviceSynchronize();
+
+	cudaEventRecord(start, 0);
 
 	for (int num_pivot = 0; num_pivot < M; ++num_pivot) {
 		Calcu_Row_Coeffs<<<dim3(16), dim3(BLOCK_DIM_X, 1, 1)>>>
@@ -46,6 +52,12 @@ int main(void)
 		Eliminate_Rows<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
 			(d_mat_ptr.toKernel(), d_coeff_ptr.toKernel(), num_pivot);
 		cudaDeviceSynchronize();
+
+		cudaEventRecord(stop, 0);
+		cudaEventSynchronize(stop);
+		float elapsedTime;
+		cudaEventElapsedTime(&elapsedTime, start, stop);
+		std::cout << "Round " << num_pivot << ": " << (elapsedTime/1000) << " s" << std::endl;
 	}
 
 	Normalize_By_Pivots<<<dim3(16, 16), dim3(BLOCK_DIM_X, BLOCK_DIM_Y, 1)>>>
@@ -53,12 +65,12 @@ int main(void)
 	cudaDeviceSynchronize();
 	
 	cudaMemcpy(&h_mat, d_mat_ptr.toKernel(), sizeof(h_mat), cudaMemcpyDeviceToHost);
-	for (uint32_t i = 0; i < M; ++i) {
+	/*for (uint32_t i = 0; i < M; ++i) {
 		for (uint32_t j = M; j < N; ++j) {
 			std::cout << std::hex << h_mat.data[i][j] << ' ';
 		}
 		std::cout << std::endl;
-	}
+	}*/
 
 	return 0;
 }

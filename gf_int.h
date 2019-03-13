@@ -113,7 +113,7 @@ template <int BITS>
 class gf_int;
 
 template <int BITS>
-__host__ __device__ constexpr gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
+__host__ __device__ gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
 template <int BITS>
 __device__ gf_int<BITS> clmul_least(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
 template <int BITS>
@@ -150,9 +150,9 @@ public:
 		// Use mask<>() to avoid integer overflow warning.
 
 public:
-	__host__ constexpr gf_int(): memory(0) {}
-	__host__ __device__ constexpr gf_int(const raw_t raw_memory): memory(raw_memory) {}
-	__host__ __device__ constexpr gf_int(const gf_int &old): memory(old.memory) {}
+	__host__ gf_int(): memory(0) {}
+	__host__ __device__ gf_int(const raw_t raw_memory): memory(raw_memory) {}
+	__host__ __device__ gf_int(const gf_int &old): memory(old.memory) {}
 
 	__host__ __device__ constexpr raw_t value() const {
 		return mask<BITS>(memory);
@@ -174,7 +174,7 @@ public:
 		// Assumption 1: To threads in a bundle, all the accessible data are consistent
 
 		memory ^= rhs.memory;
-		__syncthreads();
+		// __syncthreads();
 		// For any thread in bundle,
 		// no read and no write before writing this down.
 		
@@ -202,8 +202,9 @@ public:
 		}
 
 		this->memory = c;
-		__syncthreads();
+		// __syncthreads();
 
+		return *this;
 /*
 		// ****************************************
 		// Begin Critical Section
@@ -226,7 +227,6 @@ public:
 		// End Critical Section
 		// ****************************************
 */
-		return *this;
 	}
 
 	__device__ gf_int & clmuled_least_by(const gf_int &rhs) {
@@ -272,7 +272,7 @@ public:
 };
 
 template <int BITS>
-__host__ __device__ constexpr gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
+__host__ __device__ gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
 {
 	gf_int<BITS> result(lhs);
 	result += rhs;
