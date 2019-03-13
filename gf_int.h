@@ -6,13 +6,6 @@
 
 
 
-constexpr int CURRENT_BITS = 8;
-
-constexpr int BLOCK_DIM_X = 8;
-constexpr int BLOCK_DIM_Y = (1024 / CURRENT_BITS / BLOCK_DIM_X);
-
-
-
 template <bool IF>
 using bool_constant = std::integral_constant<bool, IF>;
 
@@ -44,29 +37,6 @@ struct gf_raw<BITS, bool_constant<in_closed_range(BITS, 17, 32)>> {
 template <int BITS>
 struct gf_raw<BITS, bool_constant<in_closed_range(BITS, 33, 64)>> {
 	using type = uint64_t;
-};
-
-
-
-constexpr bool is_power_of_2(int n) {
-	return (n == 1) ? true : ( (n%2 == 0) ? is_power_of_2(n/2) : false );
-}
-
-template <int BITS, typename = bool_constant<true>>
-struct reduction;
-
-template <int BITS>
-struct reduction< BITS, bool_constant<is_power_of_2(BITS)> > {
-	__host__ __device__ inline static bool index_check(const int digit, const int partner, const int stride) {
-		return digit % stride == 0;
-	}
-};
-
-template <int BITS>
-struct reduction< BITS, bool_constant<is_power_of_2(BITS) == false> > {
-	__host__ __device__ inline static bool index_check(const int digit, const int partner, const int stride) {
-		return digit % stride == 0 && partner < BITS;
-	}
 };
 
 
@@ -154,79 +124,32 @@ public:
 	__host__ __device__ gf_int(const raw_t raw_memory): memory(raw_memory) {}
 	__host__ __device__ gf_int(const gf_int &old): memory(old.memory) {}
 
-	__host__ __device__ constexpr raw_t value() const {
+	__host__ __device__ raw_t value() const {
 		return mask<BITS>(memory);
 	}
 
-	__device__ gf_int & operator=(const gf_int &rhs) {
-		// __syncthreads();
-		memory = rhs.memory;
-		return *this;
-	}
-	__host__ gf_int & assigned(const gf_int &rhs) {
+	__host__ __device__ gf_int & operator=(const gf_int &rhs) {
 		memory = rhs.memory;
 		return *this;
 	}
 
 	__device__ gf_int & operator+=(const gf_int &rhs) {
-		// ****************************************
-		// Begin Critical Section
-		// Assumption 1: To threads in a bundle, all the accessible data are consistent
-
 		memory ^= rhs.memory;
-		// __syncthreads();
-		// For any thread in bundle,
-		// no read and no write before writing this down.
-		
-		// Assumption 1 is kept
-
-		// End Critical Section
-		// ****************************************
-
 		return *this;
 	}
 
 	template <raw_t (*f_split)(const raw_t a, const raw_t b, const int digit)>
 	__device__ gf_int & clmuled_by(const gf_int &rhs) {
 		const gf_int &lhs = *this;
-		// const int digit = threadIdx.z;
 
-		// __shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y][BITS];
-		// auto &c = all_c[threadIdx.x][threadIdx.y];
-		__shared__ raw_t all_c[BLOCK_DIM_X][BLOCK_DIM_Y];
-		auto &c = all_c[threadIdx.x][threadIdx.y];
-
-		c = raw_t(0);
+		raw_t c(0);
 		for (int i = 0; i < BITS; ++i) {
 			c ^= f_split(lhs.memory, rhs.memory, i);
 		}
 
 		this->memory = c;
-		// __syncthreads();
 
 		return *this;
-/*
-		// ****************************************
-		// Begin Critical Section
-
-		c[digit] = f_split(lhs.memory, rhs.memory, digit);
-		__syncthreads();
-
-		// Warning: Better Reduction Algorithm?
-		for (int stride = 2; stride <= BITS; stride *= 2) {
-			int partner = digit + (stride >> 1);
-			if (reduction<BITS>::index_check(digit, partner, stride)) {
-				c[digit] ^= c[partner];
-			}
-			__syncthreads();
-		}
-
-		this->memory = c[0];
-		__syncthreads();
-
-		// End Critical Section
-		// ****************************************
-*/
 	}
 
 	__device__ gf_int & clmuled_least_by(const gf_int &rhs) {
@@ -254,7 +177,7 @@ public:
 		return *this;
 	}
 
-	__device__ gf_int inverse() {
+	__device__ gf_int inverse() const {
 		gf_int c(*this);
 		
 		for (int i = 1; i < BITS-1; ++i) {
@@ -272,7 +195,7 @@ public:
 };
 
 template <int BITS>
-__host__ __device__ gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
+__device__ gf_int<BITS> operator+(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs)
 {
 	gf_int<BITS> result(lhs);
 	result += rhs;
