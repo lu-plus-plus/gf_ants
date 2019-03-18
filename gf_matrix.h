@@ -121,3 +121,81 @@ __global__ void Normalize_By_Pivots(
 }
 
 
+
+template <typename T, int M, int N, int Mp, int Np>
+void shared_load(T dest[M][N], T src[Mp][Np], int begin_x, int begin_y)
+{
+    dest[threadIdx.x][threadIdx.y] = src[begin_x + threadIdx.x][begin_y + threadIdx.y];
+    __syncthreads();
+}
+
+template <typename T, int M, int N, int Mp, int Np>
+void shared_store(T src[M][N], T dest[Mp][Np], int begin_x, int begin_y)
+{
+    dest[begin_x + threadIdx.x][begin_y + threadIdx.y] = src[threadIdx.x][threadIdx.y];
+    __syncthreads();
+}
+
+template <typename T, int M, int N, int K>
+void shared_mul(T A[M][N], T B[N][K], T C[M][K])
+{
+    T sum(0);
+    for (int j = 0; j < N; ++j) {
+        sum += A[threadIdx.x][j] * B[j][threadIdx.y];
+    }
+    C[threadIdx.x][threadIdx.y] = sum;
+    __syncthreads();
+}
+
+template <typename T, int N>
+void shared_inverse(T A[N][N], T left[N][N])
+{
+    left[threadIdx.x][threadIdx.y] = (threadIdx.x == threadIdx.y) ? T(1) : T(0);
+    __syncthreads();
+
+    for (int pivot_idx = 0; pivot_idx < N; ++pivot_idx) {
+        T pivot_inv = A[pivot_idx][pivot_idx].inverse();
+
+        T coeff = (threadIdx.x == pivot_idx) ? T(0) : (pivot_inv * A[threadIdx.x][pivot_idx]);
+        __syncthreads();
+
+        A[threadIdx.x][threadIdx.y] += coeff * A[pivot_idx][threadIdx.y];
+        left[threadIdx.x][threadIdx.y] += coeff * left[pivot_idx][threadIdx.y];
+
+        __syncthreads();
+    }
+}
+
+
+
+template <int M, int BITS>
+__global__ void block_elim_round(
+    gf_square<M, BITS> *_squareA,
+    gf_square<M, BITS> *_squareB,
+    const int idx_pivot_block)
+{
+    auto &dataA = (*_squareA).data;
+    auto &dataB = (*_squareB).data;
+
+    int begin_x = (blockIdx.x + idx_pivot_block) * blockDim.x;
+    int stride_x = gridDim.x * blockDim.x;
+    int begin_y = idx_pivot_block * blockDim.y;
+
+    for (int i = begin_x; i < M; i += stride_x) {
+        __shared__ pivot_block[BLOCK_DIM_X][BLOCK_DIM_Y];
+        __shared__ coeff_block[BLOCK_DIM_X][BLOCK_DIM_Y];
+
+        shared_load(pivot_block, dataA, i, begin_y);
+        shared_inverse(pivot_block, coeff_block);
+
+        for (int j = begin_y + blockDim.y; j < M; j += blockDim.y) {
+            __shared__ triv_block[BLOCK_DIM_X][BLOCK_DIM_Y];
+            shared_load(triv_block, dataA, i, j);
+
+            __shared__ result_block[BLOCK_DIM_X][BLOCK_DIM_Y];
+            shared_mul(triv_block, coeff_block, result_block);
+            
+            shared_store(result_block, dataA, i, j);
+        }
+    }
+}
