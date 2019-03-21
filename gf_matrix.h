@@ -1,54 +1,23 @@
 #include "gf_int.h"
 
-#include <cstdio>
 
-constexpr int BLOCK_DIM_X = 16;
-constexpr int BLOCK_DIM_Y = 16;
 
-template <int M, int N, int BITS>
+/* ************************************************** */
+/* General Matrix Type */
+
+template <typename T, int M, int N>
 class gf_matrix
 {
 public:
-    using data_t = gf_int<BITS>;
-
-    data_t data[M][N];
-
-    gf_matrix() = default;
+    T data[M][N];
 };
 
-template <int M, int N, int K, int BITS>
-__global__ void gf_mul_matrix(
-    const gf_matrix<M, N, BITS> *_A,
-    const gf_matrix<N, K, BITS> *_B,
-    gf_matrix<M, K, BITS> *_C)
-{
-    const auto &A = *_A;
-	const auto &B = *_B;
-	auto &C = *_C;
-
-	int begin_x = blockIdx.x * blockDim.x + threadIdx.x;
-	int begin_y = blockIdx.y * blockDim.y + threadIdx.y;
-	int stride_x = gridDim.x * blockDim.x;
-	int stride_y = gridDim.y * blockDim.y;
-
-    for (int i = begin_x; i < M; i += stride_x) {
-		for (int k = begin_y; k < K; k += stride_y) {
-			gf_int<BITS> sum(0);
-			for (int j = 0; j < N; ++j) {
-				sum += A[i][j] * B[j][k];
-			}
-			C[i][k] = sum;
-		}
-	}
-}
+template <typename T, int M>
+using gf_square = gf_matrix<T, M, M>;
 
 
 
-template <int M, int BITS>
-using gf_square = gf_matrix<M, M, BITS>;
-
-
-
+/*
 template <int M, int BITS>
 __global__ void Calcu_Row_Coeffs(
     const gf_square<M, BITS> *_squareA,
@@ -119,83 +88,114 @@ __global__ void Normalize_By_Pivots(
         }
     }
 }
+*/
 
 
 
-template <typename T, int M, int N, int Mp, int Np>
-void shared_load(T dest[M][N], T src[Mp][Np], int begin_x, int begin_y)
+constexpr int BLOCK_DIM = 32;
+
+
+
+template <typename T, int N, int Np>
+__device__ inline
+void shared_load(T dest[N][N], const T src[][Np], const int begin_y, const int begin_x)
 {
-    dest[threadIdx.x][threadIdx.y] = src[begin_x + threadIdx.x][begin_y + threadIdx.y];
+    dest[threadIdx.y][threadIdx.x] = src[begin_y + threadIdx.y][begin_x + threadIdx.x];
     __syncthreads();
 }
 
-template <typename T, int M, int N, int Mp, int Np>
-void shared_store(T src[M][N], T dest[Mp][Np], int begin_x, int begin_y)
+template <typename T, int N, int Np>
+__device__ inline
+void shared_store(T dest[][Np], const int begin_y, const int begin_x, const T src[N][N])
 {
-    dest[begin_x + threadIdx.x][begin_y + threadIdx.y] = src[threadIdx.x][threadIdx.y];
-    __syncthreads();
-}
-
-template <typename T, int M, int N, int K>
-void shared_mul(T A[M][N], T B[N][K], T C[M][K])
-{
-    T sum(0);
-    for (int j = 0; j < N; ++j) {
-        sum += A[threadIdx.x][j] * B[j][threadIdx.y];
-    }
-    C[threadIdx.x][threadIdx.y] = sum;
+    dest[begin_y + threadIdx.y][begin_x + threadIdx.x] = src[threadIdx.y][threadIdx.x];
     __syncthreads();
 }
 
 template <typename T, int N>
-void shared_inverse(T A[N][N], T left[N][N])
+__device__ inline
+void shared_copy(T dest[N][N], const T src[N][N])
 {
-    left[threadIdx.x][threadIdx.y] = (threadIdx.x == threadIdx.y) ? T(1) : T(0);
+    dest[threadIdx.y][threadIdx.x] = src[threadIdx.y][threadIdx.x];
     __syncthreads();
+}
+
+template <typename T, int N>
+__device__ inline
+void shared_identify(T data[N][N])
+{
+    data[threadIdx.y][threadIdx.x] = (threadIdx.y == threadIdx.x) ? T(1) : T(0);
+    __syncthreads();
+}
+
+template <typename T, int N>
+__device__ inline
+void shared_mul(const T A[N][N], const T B[N][N], T C[N][N])
+{
+    T sum(0);
+    for (int j = 0; j < N; ++j) {
+        sum += A[threadIdx.y][j] * B[j][threadIdx.x];
+    }
+    C[threadIdx.y][threadIdx.x] = sum;
+    __syncthreads();
+}
+
+template <typename T, int N>
+__device__ inline
+void shared_inverse(const T const_A[N][N], T B[N][N])
+{
+    __shared__ T A[BLOCK_DIM][BLOCK_DIM];
+    shared_copy(A, const_A);
+    shared_identify(B);
 
     for (int pivot_idx = 0; pivot_idx < N; ++pivot_idx) {
-        T pivot_inv = A[pivot_idx][pivot_idx].inverse();
+        if (threadIdx.y != pivot_idx) {
+            T coeff = A[pivot_idx][pivot_idx].inverse() * A[threadIdx.y][pivot_idx];
 
-        T coeff = (threadIdx.x == pivot_idx) ? T(0) : (pivot_inv * A[threadIdx.x][pivot_idx]);
-        __syncthreads();
-
-        A[threadIdx.x][threadIdx.y] += coeff * A[pivot_idx][threadIdx.y];
-        left[threadIdx.x][threadIdx.y] += coeff * left[pivot_idx][threadIdx.y];
-
+            A[threadIdx.y][threadIdx.x] += coeff * A[pivot_idx][threadIdx.x];
+            B[threadIdx.y][threadIdx.x] += coeff * B[pivot_idx][threadIdx.x];
+        }
         __syncthreads();
     }
+
+    B[threadIdx.y][threadIdx.x] *= A[threadIdx.y][threadIdx.y].inverse();
+    __syncthreads();
 }
 
 
 
-template <int M, int BITS>
-__global__ void block_elim_round(
-    gf_square<M, BITS> *_squareA,
-    gf_square<M, BITS> *_squareB,
-    const int idx_pivot_block)
+template <typename T, int M>
+__global__ void shared_op_test(
+    gf_square<T, M> *_squareA,
+    gf_square<T, M> *_squareB)
 {
     auto &dataA = (*_squareA).data;
     auto &dataB = (*_squareB).data;
 
-    int begin_x = (blockIdx.x + idx_pivot_block) * blockDim.x;
-    int stride_x = gridDim.x * blockDim.x;
-    int begin_y = idx_pivot_block * blockDim.y;
+    __shared__ T A[BLOCK_DIM][BLOCK_DIM];
+    __shared__ T B[BLOCK_DIM][BLOCK_DIM];
 
-    for (int i = begin_x; i < M; i += stride_x) {
-        __shared__ pivot_block[BLOCK_DIM_X][BLOCK_DIM_Y];
-        __shared__ coeff_block[BLOCK_DIM_X][BLOCK_DIM_Y];
+    shared_load(A, dataB, 0, 0);
+    shared_copy(B, A);
+    shared_load(A, dataA, 0, 0);
 
-        shared_load(pivot_block, dataA, i, begin_y);
-        shared_inverse(pivot_block, coeff_block);
+    B[threadIdx.y][threadIdx.x] = T(0x7);
+    __syncthreads();
+    shared_inverse(A, B);
 
-        for (int j = begin_y + blockDim.y; j < M; j += blockDim.y) {
-            __shared__ triv_block[BLOCK_DIM_X][BLOCK_DIM_Y];
-            shared_load(triv_block, dataA, i, j);
+    __shared__ T C[BLOCK_DIM][BLOCK_DIM];
+    shared_mul(A, B, C);
 
-            __shared__ result_block[BLOCK_DIM_X][BLOCK_DIM_Y];
-            shared_mul(triv_block, coeff_block, result_block);
-            
-            shared_store(result_block, dataA, i, j);
-        }
-    }
+    shared_store(dataB, 0, 0, C);
+}
+
+
+
+template <typename T, int M>
+__global__ void gaussian_round(
+    gf_square<T, M> *_squareA,
+    gf_square<T, M> *_squareB,
+    const int pivot_block_idx)
+{
+    
 }

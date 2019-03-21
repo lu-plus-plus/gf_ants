@@ -1,7 +1,8 @@
 
 CC = nvcc
 
-CPPFLAGS += -std=c++14
+CPPFLAGS += -std=c++14 \
+	-Xcudafe "--diag_suppress=2947"
 
 EXEC = exec_gf
 OBJS = main.o
