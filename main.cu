@@ -4,11 +4,11 @@
 
 constexpr bool PRINT_VERBOSE = 0;
 constexpr bool PRINT_INITIAL_VALUE = 0;
-constexpr bool PRINT_RESULT = 1;
+constexpr bool PRINT_RESULT = 0;
 
 
 
-constexpr int M = 32;
+constexpr int M = 2048;
 
 constexpr int BITS = 8;
 
@@ -23,6 +23,11 @@ square_t h_B;
 
 int main(void)
 {
+	if (M % BLOCK_DIM != 0) {
+		std::cout << "This square matrix isn't block-size-aligned." << std::endl;
+		throw std::exception();
+	}
+
 	try {
 		// Allocate heap memory on device
 		cuder<square_t> d_A_ptr(make_cuder<square_t>());
@@ -51,6 +56,7 @@ int main(void)
 		cudaMemcpy(d_A_ptr.toKernel(), &h_A, sizeof(h_A), cudaMemcpyHostToDevice);
 		cudaMemcpy(d_B_ptr.toKernel(), &h_B, sizeof(h_B), cudaMemcpyHostToDevice);
 
+		// Time counter
 		cudaEvent_t start, stop;
 		if (PRINT_VERBOSE) {
 			cudaEventCreate(&start);
@@ -58,11 +64,17 @@ int main(void)
 			cudaEventRecord(start, 0);
 		}
 
-		dim3 grid(1, 1, 1);
+
+
+		// Guassian-Jordan Elimination
+
+		dim3 grid(GRID_DIM_X, 1);
 		dim3 block(BLOCK_DIM, BLOCK_DIM);
-		shared_op_test<<<grid, block>>>(d_A_ptr.toKernel(), d_B_ptr.toKernel());
-		/*for (int num_pivot = 0; num_pivot < M; ++num_pivot) {
+		
+		for (int pivot_block_idx = 0; pivot_block_idx < (M / BLOCK_DIM); ++pivot_block_idx) {
 			
+			elimination_round<<<grid, block>>>(
+				d_A_ptr.toKernel(), d_B_ptr.toKernel(), pivot_block_idx);
 			cudaDeviceSynchronize();
 
 			if (PRINT_VERBOSE) {
@@ -70,10 +82,18 @@ int main(void)
 				cudaEventSynchronize(stop);
 				float elapsedTime;
 				cudaEventElapsedTime(&elapsedTime, start, stop);
-				std::cout << "Round " << num_pivot << ": " << (elapsedTime/1000) << " s" << std::endl;
+				std::cout << "Round " << pivot_block_idx << ": "
+					<< (elapsedTime / 1000) << " s"
+					<< std::endl;
 			}	
-		}*/
 		
+		}
+
+		normalize_by_pivots<<<grid, block>>>(d_A_ptr.toKernel(), d_B_ptr.toKernel());
+		cudaDeviceSynchronize();
+		
+
+
 		// Copy the result back to host and/or print it
 		cudaMemcpy(&h_B, d_B_ptr.toKernel(), sizeof(h_B), cudaMemcpyDeviceToHost);
 
@@ -88,9 +108,8 @@ int main(void)
 	
 	} catch (std::bad_alloc &e) {
 		std::cout << "Failed to allocate enough memory on GPU." << std::endl;
+		throw e;
 	}
-
-
 
 	return 0;
 }

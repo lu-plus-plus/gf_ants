@@ -94,6 +94,8 @@ __global__ void Normalize_By_Pivots(
 
 constexpr int BLOCK_DIM = 32;
 
+constexpr int GRID_DIM_X = 128;
+
 
 
 template <typename T, int N, int Np>
@@ -162,6 +164,14 @@ void shared_inverse(const T const_A[N][N], T B[N][N])
     __syncthreads();
 }
 
+template <typename T, int N>
+__device__ inline
+void shared_add(T A[N][N], const T B[N][N])
+{
+    A[threadIdx.y][threadIdx.x] += B[threadIdx.y][threadIdx.x];
+    __syncthreads();
+}
+
 
 
 template <typename T, int M>
@@ -192,10 +202,87 @@ __global__ void shared_op_test(
 
 
 template <typename T, int M>
-__global__ void gaussian_round(
+__global__ void elimination_round(
     gf_square<T, M> *_squareA,
     gf_square<T, M> *_squareB,
     const int pivot_block_idx)
 {
-    
+    auto &dataA = (*_squareA).data;
+    auto &dataB = (*_squareB).data;
+
+    const int block_begin = blockIdx.x;
+    const int block_end = M / BLOCK_DIM;
+    const int block_stride = gridDim.x;
+
+    __shared__ T pivot_block[BLOCK_DIM][BLOCK_DIM];
+    shared_load(pivot_block, dataA, pivot_block_idx * blockDim.y, pivot_block_idx * blockDim.x);
+    __shared__ T pivot_inverse[BLOCK_DIM][BLOCK_DIM];
+    shared_inverse(pivot_block, pivot_inverse);
+
+    // All the block rows
+    for (int block_row_idx = block_begin; block_row_idx < block_end; block_row_idx += block_stride) {
+        
+        // The pivot-block row is constant in each round
+        if (block_row_idx == pivot_block_idx)
+            continue;
+        
+        // Name the pivot block as P, the counterpart in this row as C.
+        // C + coeff * P = 0 should be satisfied.
+        // 
+        // coeff = inv(P) * C
+        __shared__ T counterpart[BLOCK_DIM][BLOCK_DIM];
+        shared_load(counterpart, dataA, block_row_idx * blockDim.y, pivot_block_idx * blockDim.x);
+        __shared__ T coeff[BLOCK_DIM][BLOCK_DIM];
+        shared_mul(counterpart, pivot_inverse, coeff);
+
+        __shared__ T base_along_pivot[BLOCK_DIM][BLOCK_DIM];
+        __shared__ T addition[BLOCK_DIM][BLOCK_DIM];
+        for (int block_col_idx = pivot_block_idx; block_col_idx < block_end; ++block_col_idx) {
+            shared_load(base_along_pivot, dataA, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
+            shared_mul(coeff, base_along_pivot, addition);
+            
+            shared_load(counterpart, dataA, block_row_idx * blockDim.y, block_col_idx * blockDim.x);
+            shared_add(counterpart, addition);
+            shared_store(dataA, block_row_idx * blockDim.y, block_col_idx * blockDim.x, counterpart);
+        }
+        for (int block_col_idx = 0; block_col_idx <= pivot_block_idx; ++block_col_idx) {
+            shared_load(base_along_pivot, dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
+            shared_mul(coeff, base_along_pivot, addition);
+            
+            shared_load(counterpart, dataB, block_row_idx * blockDim.y, block_col_idx * blockDim.x);
+            shared_add(counterpart, addition);
+            shared_store(dataB, block_row_idx * blockDim.y, block_col_idx * blockDim.x, counterpart);
+        }
+
+    }
+}
+
+
+
+template <typename T, int M>
+__global__ void normalize_by_pivots(
+    const gf_square<T, M> *_squareA,
+    gf_square<T, M> *_squareB)
+{
+    const auto &dataA = (*_squareA).data;
+    auto &dataB = (*_squareB).data;
+
+    const int block_begin = blockIdx.x;
+    const int block_end = M / BLOCK_DIM;
+    const int block_stride = gridDim.x;
+
+    for (int pivot_block_idx = block_begin; pivot_block_idx < block_end; pivot_block_idx += block_stride) {
+        __shared__ T pivot_block[BLOCK_DIM][BLOCK_DIM];
+        shared_load(pivot_block, dataA, pivot_block_idx * blockDim.y, pivot_block_idx * blockDim.x);
+        __shared__ T pivot_inverse[BLOCK_DIM][BLOCK_DIM];
+        shared_inverse(pivot_block, pivot_inverse);
+
+        __shared__ T base[BLOCK_DIM][BLOCK_DIM];
+        __shared__ T result[BLOCK_DIM][BLOCK_DIM];
+        for (int block_col_idx = 0; block_col_idx < block_end; ++block_col_idx) {
+            shared_load(base, dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
+            shared_mul(pivot_inverse, base, result);
+            shared_store(dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x, result);
+        }
+    }
 }
