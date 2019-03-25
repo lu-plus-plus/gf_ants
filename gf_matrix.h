@@ -17,81 +17,6 @@ using gf_square = gf_matrix<T, M, M>;
 
 
 
-/*
-template <int M, int BITS>
-__global__ void Calcu_Row_Coeffs(
-    const gf_square<M, BITS> *_squareA,
-    gf_int<BITS> coeff[],
-    const int num_pivot)
-{
-    const auto &data = (*_squareA).data;
-
-    int threadsPerBlock = blockDim.x * blockDim.y;
-    int threadsPerGrid = threadsPerBlock * gridDim.x * gridDim.y;
-    int begin = (blockIdx.x * gridDim.y + blockIdx.y) * threadsPerBlock
-        + threadIdx.x * blockDim.y + threadIdx.y;
-    int stride = threadsPerGrid;
-
-    const auto pivot_inv = data[num_pivot][num_pivot].inverse();
-    for (int i = begin; i < M; i += stride) {
-        coeff[i] = data[i][num_pivot] * pivot_inv;
-    }
-    coeff[num_pivot] = 0;
-}
-
-template <int M, int BITS>
-__global__ void Eliminate_Rows(
-    gf_square<M, BITS> *_squareA,
-    gf_square<M, BITS> *_squareB,
-    const gf_int<BITS> coeff[],
-    const int num_pivot)
-{
-    auto &dataA = (*_squareA).data;
-    auto &dataB = (*_squareB).data;
-
-    int begin_x = blockIdx.x * blockDim.x + threadIdx.x;
-    int begin_y = blockIdx.y * blockDim.y + threadIdx.y;
-    int stride_x = blockDim.x * gridDim.x;
-    int stride_y = blockDim.y * gridDim.y;
-
-    for (int i = begin_x; i < M; i += stride_x) {
-        for (int j = begin_y + num_pivot; j < M; j += stride_y) {
-            dataA[i][j] += coeff[i] * dataA[num_pivot][j];
-        }
-    }
-
-    for (int i = begin_x; i < M; i += stride_x) {
-        for (int j = begin_y; j <= num_pivot; j += stride_y) {
-            dataB[i][j] += coeff[i] * dataB[num_pivot][j];
-        }
-    }
-}
-
-template <int M, int BITS>
-__global__ void Normalize_By_Pivots(
-    const gf_square<M, BITS> *_squareA,
-    gf_square<M, BITS> *_squareB)
-{
-    const auto &dataA = (*_squareA).data;
-    auto &dataB = (*_squareB).data;
-
-    int begin_x = blockIdx.x * blockDim.x + threadIdx.x;
-    int begin_y = blockIdx.y * blockDim.y + threadIdx.y;
-    int stride_x = blockDim.x * gridDim.x;
-    int stride_y = blockDim.y * gridDim.y;
-
-    for (int i = begin_x; i < M; i += stride_x) {
-        auto pivot_inv = dataA[i][i].inverse();
-        
-        for (int j = begin_y; j < M; j += stride_y) {
-            dataB[i][j] *= pivot_inv;
-        }
-    }
-}
-*/
-
-
-
 constexpr int BLOCK_DIM = 32;
 
 constexpr int GRID_DIM_X = 128;
@@ -172,6 +97,14 @@ void shared_add(T A[N][N], const T B[N][N])
     __syncthreads();
 }
 
+template <typename T, int N, int Np>
+__device__ inline
+void global_add(T dest[][Np], const int begin_y, const int begin_x, const T src[N][N])
+{
+    dest[begin_y + threadIdx.y][begin_x + threadIdx.x] += src[threadIdx.y][threadIdx.x];
+    __syncthreads();
+}
+
 
 
 template <typename T, int M>
@@ -241,17 +174,13 @@ __global__ void elimination_round(
             shared_load(base_along_pivot, dataA, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
             shared_mul(coeff, base_along_pivot, addition);
             
-            shared_load(counterpart, dataA, block_row_idx * blockDim.y, block_col_idx * blockDim.x);
-            shared_add(counterpart, addition);
-            shared_store(dataA, block_row_idx * blockDim.y, block_col_idx * blockDim.x, counterpart);
+            global_add(dataA, block_row_idx * blockDim.y, block_col_idx * blockDim.x, addition);
         }
         for (int block_col_idx = 0; block_col_idx <= pivot_block_idx; ++block_col_idx) {
             shared_load(base_along_pivot, dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
             shared_mul(coeff, base_along_pivot, addition);
             
-            shared_load(counterpart, dataB, block_row_idx * blockDim.y, block_col_idx * blockDim.x);
-            shared_add(counterpart, addition);
-            shared_store(dataB, block_row_idx * blockDim.y, block_col_idx * blockDim.x, counterpart);
+            global_add(dataB, block_row_idx * blockDim.y, block_col_idx * blockDim.x, addition);
         }
 
     }
