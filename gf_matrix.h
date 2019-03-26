@@ -17,9 +17,9 @@ using gf_square = gf_matrix<T, M, M>;
 
 
 
-constexpr int BLOCK_DIM = 32;
+constexpr int BLOCK_DIM = 8;
 
-constexpr int GRID_DIM_X = 128;
+constexpr int GRID_DIM_X = 512;
 
 
 
