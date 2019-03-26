@@ -1,9 +1,17 @@
 #include "gf_int.h"
 
 
+/* ************************************************** */
+/* Parameters of kernel-invocation */
+
+constexpr int BLOCK_DIM = 8;
+
+constexpr int GRID_DIM_X = 512;
+
+
 
 /* ************************************************** */
-/* General Matrix Type */
+/* Matrix Type */
 
 template <typename T, int M, int N>
 class gf_matrix
@@ -17,11 +25,8 @@ using gf_square = gf_matrix<T, M, M>;
 
 
 
-constexpr int BLOCK_DIM = 8;
-
-constexpr int GRID_DIM_X = 512;
-
-
+/* ************************************************** */
+/* Matrix Operations on __shared__ memory, mainly */
 
 template <typename T, int N, int Np>
 __device__ inline
@@ -105,8 +110,6 @@ void global_add(T dest[][Np], const int begin_y, const int begin_x, const T src[
     __syncthreads();
 }
 
-
-
 template <typename T, int M>
 __global__ void shared_op_test(
     gf_square<T, M> *_squareA,
@@ -133,6 +136,9 @@ __global__ void shared_op_test(
 }
 
 
+
+/* ************************************************** */
+/* Block-level Gaussian Elimination */
 
 template <typename T, int M>
 __global__ void elimination_round(
@@ -186,8 +192,6 @@ __global__ void elimination_round(
     }
 }
 
-
-
 template <typename T, int M>
 __global__ void normalize_by_pivots(
     const gf_square<T, M> *_squareA,
@@ -212,6 +216,102 @@ __global__ void normalize_by_pivots(
             shared_load(base, dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x);
             shared_mul(pivot_inverse, base, result);
             shared_store(dataB, pivot_block_idx * blockDim.y, block_col_idx * blockDim.x, result);
+        }
+    }
+}
+
+
+
+/* ************************************************** */
+/* Virtual Matrix Type */
+/* It only represents a part of a gf_matrix and stores no data of it. */
+
+template <typename T, int STRIDE>
+class v_matrix
+{
+private:
+    T (*base)[STRIDE];
+    int size_y, size_x;
+
+public:
+    __device__ v_matrix(T &first_elem, const int _size_y, const int _size_x):
+        base(reinterpret_cast<float (*)[STRIDE]>(&first_elem)),
+        size_y(_size_y), size_x(_size_x)
+        {}
+    
+    template <int M>
+    __device__ v_matrix(const gf_matrix<T, M, STRIDE> &m):
+        base(m.data), size_y(M), size_x(STRIDE) {}
+    
+    __device__ const T * operator[](const int y) const {
+		return base[y];
+	}
+    __device__ T * operator[](const int y) {
+		return const_cast<T *>(const_cast<const v_matrix &>(*this)[y]);
+	}
+};
+
+
+
+// Block-level Matrices Multiplication
+// This means,
+// the size of any matrix must be multiple of BLOCK_DIM.
+
+template <typename T, int strideA, int strideB>
+__device__ void mtx_slice_mul(
+	const v_matrix<T, strideA> &subA,
+	const v_matrix<T, strideB> &subB,
+	v_matrix<T, strideB> &subC)
+{
+    T Cvalue(0);
+
+    const int N = subA.size_x;
+    const int row = threadIdx.y;
+    const int col = threadIdx.x;
+
+    for (int n = 0; n * BLOCK_DIM < N; ++n) {
+
+        v_matrix<T, strideA> tmpA(subA[0][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
+        v_matrix<T, strideA> tmpB(subA[n * BLOCK_DIM][0], BLOCK_DIM, BLOCK_DIM);
+
+        __shared__ T sharedA[BLOCK_DIM][BLOCK_DIM];
+		__shared__ T sharedB[BLOCK_DIM][BLOCK_DIM];
+
+		// Load and Synchronize
+		sharedA[row][col] = tmpA[row][col];
+		sharedB[row][col] = tmpB[row][col];
+		__syncthreads();
+
+        // Multiply, Accumulate and Synchronize
+        for (int j = 0; j < BLOCK_DIM; ++j) {
+			Cvalue += sharedA[row][j] * sharedB[j][col];
+		}
+        __syncthreads();
+
+    }
+
+    subC[row][col] = Cvalue;
+}
+
+
+
+template <typename T, int M, int N, int K>
+__global__ void gf_matrix_mul(
+	gf_matrix<T, M, N> *_A,
+	gf_matrix<T, N, K> *_B,
+	gf_matrix<T, M, K> *_C)
+{
+    v_matrix<T, N> A(*_A);
+	v_matrix<T, K> B(*_B);
+	v_matrix<T, K> C(*_C);
+
+    for (int m = blockIdx.x; m * BLOCK_DIM < M; m += gridDim.x) {
+		for (int k = blockIdx.y; k * BLOCK_DIM < K; k += gridDim.y) {
+            v_matrix<T, N> subA(A[m * BLOCK_DIM][0], BLOCK_DIM, A.size_x);
+			v_matrix<T, K> subB(B[0][k * BLOCK_DIM], B.size_y, BLOCK_DIM);
+			v_matrix<T, K> subC(C[m * BLOCK_DIM][k * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
+			
+			mtx_slice_mul(subA, subB, subC);
         }
     }
 }
