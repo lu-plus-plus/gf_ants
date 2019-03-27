@@ -231,16 +231,17 @@ class v_matrix
 {
 private:
     T (*base)[STRIDE];
-    int size_y, size_x;
 
 public:
+    const int size_y, size_x;
+
     __device__ v_matrix(T &first_elem, const int _size_y, const int _size_x):
-        base(reinterpret_cast<float (*)[STRIDE]>(&first_elem)),
+        base(reinterpret_cast<T (*)[STRIDE]>(&first_elem)),
         size_y(_size_y), size_x(_size_x)
         {}
     
     template <int M>
-    __device__ v_matrix(const gf_matrix<T, M, STRIDE> &m):
+    __device__ v_matrix(gf_matrix<T, M, STRIDE> &m):
         base(m.data), size_y(M), size_x(STRIDE) {}
     
     __device__ const T * operator[](const int y) const {
@@ -251,6 +252,28 @@ public:
 	}
 };
 
+template <typename T, int STRIDE>
+class const_v_matrix
+{
+private:
+    const T (*base)[STRIDE];
+
+public:
+    const int size_y, size_x;
+
+    __device__ const_v_matrix(const T &first_elem, const int _size_y, const int _size_x):
+        base(reinterpret_cast<const T (*)[STRIDE]>(&first_elem)),
+        size_y(_size_y), size_x(_size_x)
+        {}
+    
+    template <int M>
+    __device__ const_v_matrix(const gf_matrix<T, M, STRIDE> &m):
+        base(m.data), size_y(M), size_x(STRIDE) {}
+    
+    __device__ const T * operator[](const int y) {
+		return base[y];
+	}
+};
 
 
 // Block-level Matrices Multiplication
@@ -259,8 +282,8 @@ public:
 
 template <typename T, int strideA, int strideB>
 __device__ void mtx_slice_mul(
-	const v_matrix<T, strideA> &subA,
-	const v_matrix<T, strideB> &subB,
+	const_v_matrix<T, strideA> &subA,
+	const_v_matrix<T, strideB> &subB,
 	v_matrix<T, strideB> &subC)
 {
     T Cvalue(0);
@@ -271,8 +294,8 @@ __device__ void mtx_slice_mul(
 
     for (int n = 0; n * BLOCK_DIM < N; ++n) {
 
-        v_matrix<T, strideA> tmpA(subA[0][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
-        v_matrix<T, strideA> tmpB(subA[n * BLOCK_DIM][0], BLOCK_DIM, BLOCK_DIM);
+        const_v_matrix<T, strideA> tmpA(subA[0][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
+        const_v_matrix<T, strideB> tmpB(subB[n * BLOCK_DIM][0], BLOCK_DIM, BLOCK_DIM);
 
         __shared__ T sharedA[BLOCK_DIM][BLOCK_DIM];
 		__shared__ T sharedB[BLOCK_DIM][BLOCK_DIM];
@@ -291,24 +314,25 @@ __device__ void mtx_slice_mul(
     }
 
     subC[row][col] = Cvalue;
+    __syncthreads();
 }
 
 
 
 template <typename T, int M, int N, int K>
 __global__ void gf_matrix_mul(
-	gf_matrix<T, M, N> *_A,
-	gf_matrix<T, N, K> *_B,
+	const gf_matrix<T, M, N> *_A,
+	const gf_matrix<T, N, K> *_B,
 	gf_matrix<T, M, K> *_C)
 {
-    v_matrix<T, N> A(*_A);
-	v_matrix<T, K> B(*_B);
+    const_v_matrix<T, N> A(*_A);
+	const_v_matrix<T, K> B(*_B);
 	v_matrix<T, K> C(*_C);
 
-    for (int m = blockIdx.x; m * BLOCK_DIM < M; m += gridDim.x) {
-		for (int k = blockIdx.y; k * BLOCK_DIM < K; k += gridDim.y) {
-            v_matrix<T, N> subA(A[m * BLOCK_DIM][0], BLOCK_DIM, A.size_x);
-			v_matrix<T, K> subB(B[0][k * BLOCK_DIM], B.size_y, BLOCK_DIM);
+    for (int m = blockIdx.y; m * BLOCK_DIM < M; m += gridDim.y) {
+		for (int k = blockIdx.x; k * BLOCK_DIM < K; k += gridDim.x) {
+            const_v_matrix<T, N> subA(A[m * BLOCK_DIM][0], BLOCK_DIM, A.size_x);
+			const_v_matrix<T, K> subB(B[0][k * BLOCK_DIM], B.size_y, BLOCK_DIM);
 			v_matrix<T, K> subC(C[m * BLOCK_DIM][k * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
 			
 			mtx_slice_mul(subA, subB, subC);

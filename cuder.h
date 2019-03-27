@@ -56,6 +56,8 @@ public:
 		raw = another.raw;
 		_count = another._count;
 		++(*_count);
+
+		return *this;
 	}
 	~remote_ptr() {
 		try_release();
@@ -87,17 +89,11 @@ class cuder
 private:
 	T *host_ptr;
 	remote_ptr<T> dev_ptr;
-	std::string file_name;
 
 public:
-	cuder(const T *_host, const remote_ptr<T> _dev): file_name(std::string()) {
-		host_ptr = _host;
-		dev_ptr = _dev;
-	}
+	cuder(T *_host, const remote_ptr<T> &_dev): host_ptr(_host), dev_ptr(_dev) {}
 
-	void init(const std::string &new_name, void init_fun(T *)) {
-		file_name = new_name;
-
+	void init(void init_fun(T *)) {
 		init_fun(host_ptr);
 		cudaMemcpy(dev_ptr.toKernel(), host_ptr, sizeof(T), cudaMemcpyHostToDevice);
 	}
@@ -106,8 +102,8 @@ public:
 		cudaMemcpy(host_ptr, dev_ptr.toKernel(), sizeof(T), cudaMemcpyDeviceToHost);
 	}
 
-	void write_disk() {
-		std::ofstream ofs(file_name, std::ios::binary);
+	void write_disk(const std::string &file_name) {
+		std::ofstream ofs("temp/" + file_name, std::ios::binary);
 		if (!ofs)
 			throw bad_file_stream();
 		
@@ -119,12 +115,8 @@ public:
 		ofs.close();
 	}
 
-	void load(const std::string &new_name) {
-		if (file_name == new_name)
-			return;
-
-		file_name = new_name;
-		std::ifstream ifs(file_name, std::ios::binary);
+	void load(const std::string &file_name) {
+		std::ifstream ifs("temp/" + file_name, std::ios::binary);
 		if (!ifs)
 			throw bad_file_stream();
 		
