@@ -30,8 +30,8 @@ int main(void)
 
 	try {
 		// Allocate heap memory on device
-		cuder<square_t> d_A_ptr(make_cuder<square_t>());
-		cuder<square_t> d_B_ptr(make_cuder<square_t>());
+		remote_ptr<square_t> d_A_ptr(make_remote<square_t>());
+		remote_ptr<square_t> d_B_ptr(make_remote<square_t>());
 
 		// Initialize host data and/or print it
 		for (uint32_t i = 0; i < M; ++i) {
@@ -106,8 +106,8 @@ int main(void)
 			}
 		}
 	
-	} catch (std::bad_alloc &e) {
-		std::cout << "Failed to allocate enough memory on GPU." << std::endl;
+	} catch (std::exception &e) {
+		std::cout << "Error: " << e.what() << std::endl;
 		throw e;
 	}
 
