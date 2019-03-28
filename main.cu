@@ -8,19 +8,14 @@
 
 
 
-constexpr int M = 1024;
+constexpr int TOTAL_DIM = 2048;
+
+constexpr int CAPABLE_DIM = 1024;
 
 constexpr int BITS = 8;
 
 using gf_int_t = gf_int<BITS>;
-using square_t = gf_square<gf_int_t, M>;
-
-
-
-// Allocate static memory on host
-static square_t h_A;
-static square_t h_B;
-static square_t h_C;
+using square_t = gf_square<gf_int_t, CAPABLE_DIM>;
 
 
 
@@ -29,7 +24,9 @@ void gaussian_elimination(square_t *d_A_ptr, square_t *d_B_ptr)
 	dim3 grid(GRID_DIM_X);
 	dim3 block(BLOCK_DIM, BLOCK_DIM);
 	
-	for (int pivot_block_idx = 0; pivot_block_idx < (M / BLOCK_DIM); ++pivot_block_idx) {
+	const int block_level_dim = CAPABLE_DIM / BLOCK_DIM;
+
+	for (int pivot_block_idx = 0; pivot_block_idx < block_level_dim; ++pivot_block_idx) {
 		elimination_round<<<grid, block>>>(d_A_ptr, d_B_ptr, pivot_block_idx);
 		cudaDeviceSynchronize();
 	}
@@ -41,31 +38,31 @@ void gaussian_elimination(square_t *d_A_ptr, square_t *d_B_ptr)
 
 
 void init_A(square_t *obj) {
-	for (uint32_t i = 0; i < M; ++i) {
-		for (uint32_t j = i; j < M; ++j) {
+	for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
+		for (uint32_t j = i; j < CAPABLE_DIM; ++j) {
 			obj->data[i][j] = gf_int_t(i + j + 1);
 		}
 	}
 }
 
 void init_B(square_t *obj) {
-	for (uint32_t i = 0; i < M; ++i) {
-		for (uint32_t j = 0; j < M; ++j) {
-			obj->data[i][j] = gf_int_t(i + (M + j) + 1);
+	for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
+		for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
+			obj->data[i][j] = gf_int_t(i + (CAPABLE_DIM + j) + 1);
 		}
 	}
 }
 
 void init_D(square_t *obj) {
-	for (uint32_t i = 0; i < M; ++i) {
-		for (uint32_t j = i; j < M; ++j) {
-			obj->data[i][j] = gf_int_t(2*M + i + j + 1);
+	for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
+		for (uint32_t j = i; j < CAPABLE_DIM; ++j) {
+			obj->data[i][j] = gf_int_t(2*CAPABLE_DIM + i + j + 1);
 		}
 	}
 }
 
 void host_identify(square_t *obj) {
-	for (uint32_t i = 0; i < M; ++i) {
+	for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
 		obj->data[i][i] = gf_int_t(1);
 	}
 }
@@ -74,68 +71,70 @@ void host_identify(square_t *obj) {
 
 int main(void)
 {
-	if (M % BLOCK_DIM != 0) {
-		std::cout << "This square matrix isn't block-size-aligned." << std::endl;
+	if (CAPABLE_DIM % BLOCK_DIM != 0) {
+		std::cout << "The size of square_t isn't multiple of block size." << std::endl;
+		throw std::exception();
+	}
+	if (TOTAL_DIM % CAPABLE_DIM != 0) {
+		std::cout << "The size of square matrix isn't multiple of capable_dim." << std::endl;
 		throw std::exception();
 	}
 
 	try {
-		cuder<square_t> buf_1(&h_A, make_remote<square_t>());
-		cuder<square_t> buf_2(&h_B, make_remote<square_t>());
-		cuder<square_t> buf_3(&h_C, make_remote<square_t>());
+		cuder<square_t> buf_1(make_cuder<square_t>());
+		cuder<square_t> buf_2(make_cuder<square_t>());
+		cuder<square_t> buf_3(make_cuder<square_t>());
 
-		buf_1.init(init_A);
-		buf_2.init(host_identify);
-		gaussian_elimination(buf_1.toKernel(), buf_2.toKernel());
-		buf_2.write_disk("A_inv.bin");
+		buf_1.load(init_A);
+		buf_2.load(host_identify);
+		gaussian_elimination(buf_1, buf_2);
+		buf_2.store("A_inv.bin");
 		// buf_1 = undefined
 		// buf_2 = A_inv
 		// buf_3 = undefined
 
-		buf_1.init(init_D);
-		buf_3.init(host_identify);
-		gaussian_elimination(buf_1.toKernel(), buf_3.toKernel());
-		buf_3.write_disk("D_inv.bin");
+		buf_1.load(init_D);
+		buf_3.load(host_identify);
+		gaussian_elimination(buf_1, buf_3);
+		buf_3.store("D_inv.bin");
 		// buf_1 = undefined
 		// buf_2 = A_inv
 		// buf_3 = D_inv
 
-		buf_1.init(init_B);
-		gf_matrix_mul<<<dim3(16,16), dim3(BLOCK_DIM, BLOCK_DIM)>>>
-			(buf_2.toKernel(), buf_1.toKernel(), buf_3.toKernel());
+		buf_1.load(init_B);
+		gf_matrix_mul<<<dim3(16,16), dim3(BLOCK_DIM, BLOCK_DIM)>>>(
+			buf_2.c_ptr(), buf_1.c_ptr(), buf_3.c_ptr());
 		cudaDeviceSynchronize();
 		// buf_1 = B
 		// buf_2 = A_inv
 		// buf_3 = A_inv * B
 
 		buf_2.load("D_inv.bin");
-		gf_matrix_mul<<<dim3(16,16), dim3(BLOCK_DIM, BLOCK_DIM)>>>
-			(buf_3.toKernel(), buf_2.toKernel(), buf_1.toKernel());
+		gf_matrix_mul<<<dim3(16,16), dim3(BLOCK_DIM, BLOCK_DIM)>>>(
+			buf_3.c_ptr(), buf_2.c_ptr(), buf_1.c_ptr());
 		cudaDeviceSynchronize();
 		// buf_1 = A_inv * B * D_inv
 		// buf_2 = D_inv
 		// buf_3 = A_inv * B
 
-		buf_1.write_host();
-		buf_2.write_host();
 		buf_3.load("A_inv.bin");
 
-		for (uint32_t i = 0; i < M; ++i) {
-			for (uint32_t j = 0; j < M; ++j) {
-				std::cout << std::hex << buf_3.toHost()->data[i][j] << ' ';
+		for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
+			for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
+				std::cout << std::hex << buf_3->data[i][j] << ' ';
 			}
-			for (uint32_t j = 0; j < M; ++j) {
-				std::cout << std::hex << buf_1.toHost()->data[i][j] << ' ';
+			for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
+				std::cout << std::hex << buf_1->data[i][j] << ' ';
 			}
 			std::cout << std::endl;
 		}
 
-		for (uint32_t i = 0; i < M; ++i) {
-			for (uint32_t j = 0; j < M; ++j) {
+		for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
+			for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
 				std::cout << std::hex << gf_int_t(0) << ' ';
 			}
-			for (uint32_t j = 0; j < M; ++j) {
-				std::cout << std::hex << buf_2.toHost()->data[i][j] << ' ';
+			for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
+				std::cout << std::hex << buf_2->data[i][j] << ' ';
 			}
 			std::cout << std::endl;
 		}

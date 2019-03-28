@@ -1,21 +1,28 @@
 #include <exception>
+
+#include <utility>
+
 #include <string>
+
 #include <fstream>
 #include <ios>
 
 
 
+/* ************************************************** */
+/* Customized Exception Types */
+
 struct bad_cuda_alloc: public std::exception
 {
 	const char * what() const noexcept override {
-		return "Failed to allocate enough memory on GPU.";
+		return "Failed to allocate enough memory on device.";
 	}
 };
 
-struct bad_remote_deref: public std::exception
+struct bad_managed_deref: public std::exception
 {
 	const char * what() const noexcept override {
-		return "Dereference a null remote-ptr.";
+		return "Connot dereference a null managed_ptr.";
 	}
 };
 
@@ -28,29 +35,44 @@ struct bad_file_stream: public std::exception
 
 
 
+/* ************************************************** */
+/* Smart Pointer to CUDA managed memory */
+
+template <typename T> class managed_ptr;
+
 template <typename T>
-class remote_ptr {
-private:
+managed_ptr<T> make_managed(int size = 1);
+
+
+
+template <typename T>
+class managed_ptr {
+	
+	friend managed_ptr make_managed<T>(int size);
+
+protected:
+
 	T *raw;
 	int *_count;
-	// A pointer to T[0...(n-1)], and its reference counting.
+	// A pointer to a piece of managed memory,
+	// which automatically migrates between host and device,
+	// and its reference-counting.
+
+	explicit managed_ptr(T *_raw): raw(_raw), _count(new int(1)) {}
 
 	void try_release() {
 		if (--(*_count) == 0) {	
 			cudaFree(raw);
-			raw = nullptr;
-
 			delete _count;
-			_count = nullptr;
 		}
 	}
 
 public:
-	remote_ptr(T *_raw): raw(_raw), _count(new int(1)) {}
-	remote_ptr(const remote_ptr &another): raw(another.raw), _count(another._count) {
+
+	managed_ptr(const managed_ptr &another): raw(another.raw), _count(another._count) {
 		++(*_count);
 	}
-	remote_ptr & operator=(const remote_ptr &another) {
+	managed_ptr & operator=(const managed_ptr &another) {
 		try_release();
 		
 		raw = another.raw;
@@ -59,58 +81,71 @@ public:
 
 		return *this;
 	}
-	~remote_ptr() {
+	managed_ptr(managed_ptr &&copiee): raw(copiee.raw), _count(copiee._count) {}
+	managed_ptr & operator=(managed_ptr &&copiee) {
+		try_release();
+
+		raw = copiee.raw;
+		_count = copiee._count;
+
+		return *this;		
+	}
+	~managed_ptr() {
 		try_release();
 	}
 
-	T * toKernel() {
-		if (raw == nullptr)
-			throw bad_remote_deref();
-		
+	operator T * () const {
+		return raw;
+	}
+
+	T & operator*() const {
+		return *raw;
+	}
+
+	T * operator->() const {
 		return raw;
 	}
 };
 
+
+
 template <typename T>
-remote_ptr<T> make_remote(int length = 1) {
+managed_ptr<T> make_managed(int size)
+{
 	T *raw;
-	cudaError_t flag = cudaMalloc(&raw, sizeof(T) * length);
+
+	cudaError_t flag = cudaMallocManaged(&raw, sizeof(T) * size);
 	if (flag != cudaSuccess) {
 		throw bad_cuda_alloc();
 	}
-	return remote_ptr<T>(raw);
+
+	return managed_ptr<T>(raw);
 }
 
 
 
+/* ************************************************** */
+/* Loads data from and stores it to external memory */
+
 template <typename T>
-class cuder
+class cuder: public managed_ptr<T>
 {
-private:
-	T *host_ptr;
-	remote_ptr<T> dev_ptr;
 
 public:
-	cuder(T *_host, const remote_ptr<T> &_dev): host_ptr(_host), dev_ptr(_dev) {}
 
-	void init(void init_fun(T *)) {
-		init_fun(host_ptr);
-		cudaMemcpy(dev_ptr.toKernel(), host_ptr, sizeof(T), cudaMemcpyHostToDevice);
+	cuder(const managed_ptr<T> &&copiee): managed_ptr<T>(copiee) {}
+
+	void load(void init_fun(T *)) {
+		init_fun(static_cast<T *>(*this));
 	}
 
-	void write_host() {
-		cudaMemcpy(host_ptr, dev_ptr.toKernel(), sizeof(T), cudaMemcpyDeviceToHost);
-	}
-
-	void write_disk(const std::string &file_name) {
+	void store(const std::string &file_name) const {
 		std::ofstream ofs("temp/" + file_name, std::ios::binary);
 		if (!ofs)
 			throw bad_file_stream();
-		
-		write_host();
 
 		long long size = sizeof(T) / sizeof(char);
-		ofs.write(reinterpret_cast<const char *>(host_ptr), size);
+		ofs.write(reinterpret_cast<const char *>(static_cast<T *>(*this)), size);
 
 		ofs.close();
 	}
@@ -121,18 +156,21 @@ public:
 			throw bad_file_stream();
 		
 		long long size = sizeof(T) / sizeof(char);
-		ifs.read(reinterpret_cast<char *>(host_ptr), size);
-
-		cudaMemcpy(dev_ptr.toKernel(), host_ptr, sizeof(T), cudaMemcpyHostToDevice);
+		ifs.read(reinterpret_cast<char *>(static_cast<T *>(*this)), size);
 
 		ifs.close();
 	}
 
-	T * toHost() {
-		return host_ptr;
+	T * c_ptr() const {
+		return managed_ptr<T>::raw;
 	}
-	
-	T * toKernel() {
-		return dev_ptr.toKernel();
-	}
+
 };
+
+
+
+template <typename T>
+cuder<T> make_cuder(int size = 1)
+{
+	return cuder<T>(std::move(make_managed<T>(size)));
+}
