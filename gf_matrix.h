@@ -339,3 +339,26 @@ __global__ void gf_matrix_mul(
         }
     }
 }
+
+
+
+template <typename T, int M, int N>
+__global__ void gf_matrix_add(
+	gf_matrix<T, M, N> *_A,
+	const gf_matrix<T, M, N> *_B)
+{
+    v_matrix<T, N> A(*_A);
+	const_v_matrix<T, N> B(*_B);
+
+    for (int m = blockIdx.y; m * BLOCK_DIM < M; m += gridDim.y) {
+		for (int n = blockIdx.x; n * BLOCK_DIM < N; n += gridDim.x) {
+
+			v_matrix<T, N> subA(A[m * BLOCK_DIM][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
+			const_v_matrix<T, N> subB(B[m * BLOCK_DIM][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
+			
+            subA[threadIdx.y][threadIdx.x] += subB[threadIdx.y][threadIdx.x];
+            __syncthreads();
+			
+        }
+    }
+}

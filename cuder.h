@@ -140,7 +140,7 @@ public:
 	}
 
 	void store(const std::string &file_name) const {
-		std::ofstream ofs("temp/" + file_name, std::ios::binary);
+		std::ofstream ofs("tmp/" + file_name + ".bin", std::ios::binary);
 		if (!ofs)
 			throw bad_file_stream();
 
@@ -151,7 +151,7 @@ public:
 	}
 
 	void load(const std::string &file_name) {
-		std::ifstream ifs("temp/" + file_name, std::ios::binary);
+		std::ifstream ifs("tmp/" + file_name + ".bin", std::ios::binary);
 		if (!ifs)
 			throw bad_file_stream();
 		
