@@ -161,10 +161,6 @@ public:
 		ifs.close();
 	}
 
-	T * c_ptr() const {
-		return managed_ptr<T>::raw;
-	}
-
 };
 
 
