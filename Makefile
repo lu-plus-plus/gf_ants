@@ -1,7 +1,7 @@
 
 CC = nvcc
 
-CCFLAGS += -std=c++14 \
+CCFLAGS += -std=c++11 \
 	-Xcudafe "--diag_suppress=2947" \
 	-O2
 

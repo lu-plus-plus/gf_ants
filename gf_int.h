@@ -66,11 +66,19 @@ struct gf_constants;
 // Mask the leftmost bits, and leave the significant ones 
 // for gf_int<BITS>'s underlying type.
 
+template <typename T>
+__host__ __device__ inline constexpr int _bitwise() {
+	return sizeof(T) * 8;
+}
+
+template <int BITS, typename T>
+__host__ __device__ inline constexpr T _mask_code() {
+	return static_cast<T>(-1) >> ((_bitwise<T>()-BITS > 0) ? _bitwise<T>()-BITS : 0);
+}
+
 template <int BITS, typename T>
 __host__ __device__ inline constexpr T mask(const T memory) {
-	constexpr int raw_len = sizeof(T) * 8;
-    constexpr T mask_bits = static_cast<T>(-1) >> ((raw_len-BITS > 0) ? raw_len-BITS : 0);
-	return memory & mask_bits;
+	return memory & _mask_code<BITS, T>();
 }
 
 
@@ -141,17 +149,22 @@ private:
 	// But when reading, do it by value().
 
 private:
-	static constexpr ext_t polynomial_divide(const ext_t poly, const int digit) {
-		const ext_t bit_pick = right_shift_in<BITS*2>(poly, BITS) & (static_cast<ext_t>(1) << digit);
-		const ext_t addition = prim_g * bit_pick;
-		return ( bit_pick ? (static_cast<ext_t>(1)<<digit) : 0 ) |
-			( (digit > 0) ? polynomial_divide(poly^addition, digit-1) : 0 );
+	static constexpr ext_t _bit_pick(const ext_t poly, const int digit) {
+		return right_shift_in<BITS*2>(poly, BITS) & (static_cast<ext_t>(1) << digit);
 	}
+	static constexpr ext_t _addition(const ext_t poly, const int digit) {
+		return prim_g * _bit_pick(poly, digit);
+	}
+	static constexpr ext_t _polynomial_divide(const ext_t poly, const int digit) {
+		return ( _bit_pick(poly, digit) ? (static_cast<ext_t>(1)<<digit) : 0 ) |
+			( (digit > 0) ? _polynomial_divide(poly^_addition(poly,digit), digit-1) : 0 );
+	}
+
 public:
 	static constexpr ext_t prim_g = gf_constants<BITS>::prim_poly;
 	static constexpr raw_t g_star = static_cast<raw_t>( mask<BITS>(prim_g) );
 	static constexpr ext_t q_plus = (static_cast<ext_t>(1) << BITS)
-		| polynomial_divide(mask<BITS>(prim_g) << BITS, BITS - 1);
+		| _polynomial_divide(mask<BITS>(prim_g) << BITS, BITS - 1);
 		// Use mask<>() to avoid integer overflow warning.
 
 public:

@@ -4,11 +4,11 @@
 
 // constexpr bool PRINT_VERBOSE = 0;
 // constexpr bool PRINT_INITIAL_VALUE = 0;
-constexpr bool PRINT_RESULT = false;
+constexpr bool PRINT_RESULT = true;
 
 
 
-constexpr int TOTAL_DIM = 4096;
+constexpr int TOTAL_DIM = 2048;
 
 constexpr int CAPABLE_DIM = TOTAL_DIM / 2;
 
