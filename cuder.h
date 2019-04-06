@@ -15,7 +15,7 @@
 struct bad_cuda_alloc: public std::exception
 {
 	const char * what() const noexcept override {
-		return "Failed to allocate enough memory on device.";
+		return "Failed to allocate enough managed memory.";
 	}
 };
 

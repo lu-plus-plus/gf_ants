@@ -2,19 +2,18 @@
 #include "gf_matrix.h"
 #include "cuder.h"
 
-// constexpr bool PRINT_VERBOSE = 0;
-// constexpr bool PRINT_INITIAL_VALUE = 0;
-constexpr bool PRINT_RESULT = true;
+#define APP_BITS (8)
+
+#define APP_DIM (2048)
+
+constexpr bool PRINT_TIME = true;
+constexpr bool PRINT_RESULT = false;
 
 
 
-constexpr int TOTAL_DIM = 2048;
+using gf_int_t = gf_int<APP_BITS>;
 
-constexpr int CAPABLE_DIM = TOTAL_DIM / 2;
-
-constexpr int BITS = 8;
-
-using gf_int_t = gf_int<BITS>;
+constexpr int CAPABLE_DIM = APP_DIM / 2;
 using square_t = gf_square<gf_int_t, CAPABLE_DIM>;
 
 
@@ -111,8 +110,8 @@ int main(void)
 		std::cout << "The size of square_t isn't multiple of block size." << std::endl;
 		throw std::exception();
 	}
-	if (TOTAL_DIM != CAPABLE_DIM * 2) {
-		std::cout << "The size of square matrix must be twice capable_dim." << std::endl;
+	if (APP_DIM != CAPABLE_DIM * 2) {
+		std::cout << "The size of square matrix must be twice CAPABLE_DIM." << std::endl;
 		throw std::exception();
 	}
 
@@ -121,6 +120,15 @@ int main(void)
 		cuder<square_t> buf_2(make_cuder<square_t>());
 		cuder<square_t> buf_3(make_cuder<square_t>());
 		cuder<square_t> buf_4(make_cuder<square_t>());
+
+		// Time Counter Initialization
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+
+		if (PRINT_TIME) {
+			cudaEventRecord(start, 0);
+		}
 
 		buf_1.load(init_A);
 		buf_2.load(init_identify);
@@ -198,6 +206,14 @@ int main(void)
 		// buf_3 = Up Right
 		// buf_4 = Down Right
 
+		if (PRINT_TIME) {
+			cudaEventRecord(stop, 0);
+			cudaEventSynchronize(stop);
+			float elapsedTime;
+			cudaEventElapsedTime(&elapsedTime, start, stop);
+			std::cout << "Total Time: " << elapsedTime / 1000 << " ms." << std::endl;
+		}
+
 		if (PRINT_RESULT) {
 			for (uint32_t i = 0; i < CAPABLE_DIM; ++i) {
 				for (uint32_t j = 0; j < CAPABLE_DIM; ++j) {
@@ -218,8 +234,12 @@ int main(void)
 				}
 				std::cout << std::endl;
 			}
-		}	
+		}
 	
+		// Time Counter Destruction
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
+
 	} catch (std::exception &e) {
 		std::cout << "Error: " << e.what() << std::endl;
 		throw e;
