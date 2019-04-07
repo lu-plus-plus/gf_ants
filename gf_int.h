@@ -294,12 +294,32 @@ struct gf_constants<4> {
 	static constexpr typename gf_int<4>::ext_t prim_poly = 0x13;
 };
 template <>
-struct gf_constants<5> {
-	static constexpr typename gf_int<5>::ext_t prim_poly = 0x25;
-};
-template <>
 struct gf_constants<8> {
 	static constexpr typename gf_int<8>::ext_t prim_poly = 0x11B;
+};
+template <>
+struct gf_constants<12> {
+	static constexpr typename gf_int<12>::ext_t prim_poly = 010123;
+};
+template <>
+struct gf_constants<16> {
+	static constexpr typename gf_int<16>::ext_t prim_poly = 0210013;
+};
+template <>
+struct gf_constants<20> {
+	static constexpr typename gf_int<20>::ext_t prim_poly = 04000011;
+};
+template <>
+struct gf_constants<24> {
+	static constexpr typename gf_int<24>::ext_t prim_poly = 0100000207;
+};
+template <>
+struct gf_constants<28> {
+	static constexpr typename gf_int<28>::ext_t prim_poly = 02000000011;
+};
+template <>
+struct gf_constants<32> {
+	static constexpr typename gf_int<32>::ext_t prim_poly = 040020000007;
 };
 
 
