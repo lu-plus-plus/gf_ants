@@ -6,10 +6,19 @@
 
 
 
+/* ************************************************** */
+/* Compile-time Types and Expressions */
+
+
+
+// Bool Trait
+
 template <bool IF>
 using bool_constant = std::integral_constant<bool, IF>;
 
 
+
+// Underlying Type of Galois-field-integer
 
 constexpr bool in_closed_range(const int val, const int l, const int r)
 {
@@ -41,14 +50,42 @@ struct gf_raw<BITS, bool_constant<in_closed_range(BITS, 33, 64)>> {
 
 
 
+// Primary Polynomial over GF(2^n)
+// The defination is after gf_int's.
+
+template <int BITS>
+struct gf_constants;
+
+
+
+/* ************************************************** */
+/* Constexpr Functions */
+
+
+
+// Mask the leftmost bits, and leave the significant ones 
+// for gf_int<BITS>'s underlying type.
+
+template <typename T>
+__host__ __device__ inline constexpr int _bitwise() {
+	return sizeof(T) * 8;
+}
+
+template <int BITS, typename T>
+__host__ __device__ inline constexpr T _mask_code() {
+	return static_cast<T>(-1) >> ((_bitwise<T>()-BITS > 0) ? _bitwise<T>()-BITS : 0);
+}
+
 template <int BITS, typename T>
 __host__ __device__ inline constexpr T mask(const T memory) {
-	constexpr int raw_len = sizeof(T) * 8;
-    constexpr T mask_bits = static_cast<T>(-1) >> ((raw_len-BITS > 0) ? raw_len-BITS : 0);
-	return memory & mask_bits;
+	return memory & _mask_code<BITS, T>();
 }
 
 
+
+// A Safe Right-shift
+// Since the leftmost bits of gf_raw<BITS>::type are undefined,
+// right-shift needs an extra mask operation.
 
 template <int BITS>
 __host__ __device__ inline constexpr
@@ -57,6 +94,13 @@ typename gf_raw<BITS>::type right_shift_in(const typename gf_raw<BITS>::type mem
 }
 
 
+
+/* ************************************************** */
+/* gf_int and its tool functions */
+
+
+
+// How to split gf_int<BITS> in its carry-less multiplication.
 
 template <int BITS>
 __host__ __device__ inline typename gf_raw<BITS>::type split_least_result
@@ -75,11 +119,6 @@ __host__ __device__ inline typename gf_raw<BITS>::type split_most_result
 
 
 template <int BITS>
-struct constepxr_irreducible;
-
-
-
-template <int BITS>
 class gf_int;
 
 template <int BITS>
@@ -88,6 +127,10 @@ template <int BITS>
 __device__ gf_int<BITS> clmul_least(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
 template <int BITS>
 __device__ gf_int<BITS> clmul_most(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
+template <int BITS>
+__device__ gf_int<BITS> operator*(const gf_int<BITS> &lhs, const gf_int<BITS> &rhs);
+
+
 
 template <int BITS>
 class gf_int
@@ -106,17 +149,22 @@ private:
 	// But when reading, do it by value().
 
 private:
-	static constexpr ext_t polynomial_divide(const ext_t poly, const int digit) {
-		const ext_t bit_pick = right_shift_in<BITS*2>(poly, BITS) & (static_cast<ext_t>(1) << digit);
-		const ext_t addition = irred_g * bit_pick;
-		return ( bit_pick ? (static_cast<ext_t>(1)<<digit) : 0 ) |
-			( (digit > 0) ? polynomial_divide(poly^addition, digit-1) : 0 );
+	static constexpr ext_t _bit_pick(const ext_t poly, const int digit) {
+		return right_shift_in<BITS*2>(poly, BITS) & (static_cast<ext_t>(1) << digit);
 	}
+	static constexpr ext_t _addition(const ext_t poly, const int digit) {
+		return prim_g * _bit_pick(poly, digit);
+	}
+	static constexpr ext_t _polynomial_divide(const ext_t poly, const int digit) {
+		return ( _bit_pick(poly, digit) ? (static_cast<ext_t>(1)<<digit) : 0 ) |
+			( (digit > 0) ? _polynomial_divide(poly^_addition(poly,digit), digit-1) : 0 );
+	}
+
 public:
-	static constexpr ext_t irred_g = constepxr_irreducible<BITS>::polynomial;
-	static constexpr raw_t g_star = static_cast<raw_t>( mask<BITS>(irred_g) );
+	static constexpr ext_t prim_g = gf_constants<BITS>::prim_poly;
+	static constexpr raw_t g_star = static_cast<raw_t>( mask<BITS>(prim_g) );
 	static constexpr ext_t q_plus = (static_cast<ext_t>(1) << BITS)
-		| polynomial_divide(mask<BITS>(irred_g) << BITS, BITS - 1);
+		| _polynomial_divide(mask<BITS>(prim_g) << BITS, BITS - 1);
 		// Use mask<>() to avoid integer overflow warning.
 
 public:
@@ -160,7 +208,6 @@ public:
 		return clmuled_by<split_most_result<BITS>>(rhs);
 	}
 
-	// Galois Field Multiplication
 	__device__ gf_int & operator*=(const gf_int &rhs) {
 		gf_int c_least = clmul_least(*this, rhs);
 		gf_int &c = *this;
@@ -186,8 +233,8 @@ public:
 			c *= (*this);
 		}
 		c *= c;
-		// x^(2^n-2) = x^(-1)
-		// x^(2^n) = x^(1) as a cyclic group
+		// For a cyclic group
+		// x^(-1) = x^(2^n-2)
 
 		return c;
 	}
@@ -226,6 +273,10 @@ __device__ gf_int<BITS> operator*(const gf_int<BITS> &lhs, const gf_int<BITS> &r
 	return result;
 }
 
+
+
+// Output in Host
+
 template <int BITS>
 __host__ std::ostream & operator<<(std::ostream &os, const gf_int<BITS> &rhs)
 {
@@ -236,17 +287,39 @@ __host__ std::ostream & operator<<(std::ostream &os, const gf_int<BITS> &rhs)
 
 
 
+// Primary Polynomial over GF(2^n)
+
 template <>
-struct constepxr_irreducible<4> {
-	static constexpr typename gf_int<4>::ext_t polynomial = 0x13;
+struct gf_constants<4> {
+	static constexpr typename gf_int<4>::ext_t prim_poly = 0x13;
 };
 template <>
-struct constepxr_irreducible<5> {
-	static constexpr typename gf_int<5>::ext_t polynomial = 0x25;
+struct gf_constants<8> {
+	static constexpr typename gf_int<8>::ext_t prim_poly = 0x11B;
 };
 template <>
-struct constepxr_irreducible<8> {
-	static constexpr typename gf_int<8>::ext_t polynomial = 0x11B;
+struct gf_constants<12> {
+	static constexpr typename gf_int<12>::ext_t prim_poly = 010123;
+};
+template <>
+struct gf_constants<16> {
+	static constexpr typename gf_int<16>::ext_t prim_poly = 0210013;
+};
+template <>
+struct gf_constants<20> {
+	static constexpr typename gf_int<20>::ext_t prim_poly = 04000011;
+};
+template <>
+struct gf_constants<24> {
+	static constexpr typename gf_int<24>::ext_t prim_poly = 0100000207;
+};
+template <>
+struct gf_constants<28> {
+	static constexpr typename gf_int<28>::ext_t prim_poly = 02000000011;
+};
+template <>
+struct gf_constants<32> {
+	static constexpr typename gf_int<32>::ext_t prim_poly = 040020000007;
 };
 
 

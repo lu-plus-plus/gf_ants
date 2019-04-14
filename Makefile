@@ -1,7 +1,13 @@
 
 CC = nvcc
 
-CPPFLAGS += -std=c++14
+CPP_FLAGS += -std=c++11 -O2
+
+CUDAC_FLAGS += -Xcudafe "--diag_suppress=2947"
+
+ALL_FLAGS = $(CPP_FLAGS) $(CUDAC_FLAGS) $(SHELL_FLAGS)
+
+
 
 EXEC = exec_gf
 OBJS = main.o
@@ -17,10 +23,10 @@ run: $(EXEC)
 
 
 $(EXEC): $(OBJS)
-	$(CC) $^ -o $@ $(CPPFLAGS)
+	$(CC) $^ -o $@ $(ALL_FLAGS)
 
 main.o: main.cu cuder.h gf_int.h gf_matrix.h
-	$(CC) -c $< -o $@ $(CPPFLAGS)
+	$(CC) -c $< -o $@ $(ALL_FLAGS)
 
 
 
