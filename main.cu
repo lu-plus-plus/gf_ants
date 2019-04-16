@@ -6,7 +6,8 @@
 
 #define APP_DIM (2048)
 
-constexpr bool PRINT_TIME = true;
+constexpr bool PRINT_TOTAL_TIME = true;
+constexpr bool PRINT_VERBOSE = false;
 constexpr bool PRINT_RESULT = false;
 
 
@@ -20,7 +21,7 @@ using square_t = gf_square<gf_int_t, CAPABLE_DIM>;
 
 void square_inverse(square_t *d_A_ptr, square_t *d_B_ptr)
 {
-	dim3 grid(GRID_DIM_X);
+	dim3 grid(INVERSE_GRID_DIM_X);
 	dim3 block(BLOCK_DIM, BLOCK_DIM);
 	
 	const int block_level_dim = CAPABLE_DIM / BLOCK_DIM;
@@ -126,7 +127,7 @@ int main(void)
 		cudaEventCreate(&start);
 		cudaEventCreate(&stop);
 
-		if (PRINT_TIME) {
+		if (PRINT_TOTAL_TIME) {
 			cudaEventRecord(start, 0);
 		}
 
@@ -206,12 +207,12 @@ int main(void)
 		// buf_3 = Up Right
 		// buf_4 = Down Right
 
-		if (PRINT_TIME) {
+		if (PRINT_TOTAL_TIME) {
 			cudaEventRecord(stop, 0);
 			cudaEventSynchronize(stop);
 			float elapsedTime;
 			cudaEventElapsedTime(&elapsedTime, start, stop);
-			std::cout << "Total Time: " << elapsedTime / 1000 << " ms." << std::endl;
+			std::cout << "Total Time: " << elapsedTime / 1000 << " s." << std::endl;
 		}
 
 		if (PRINT_RESULT) {

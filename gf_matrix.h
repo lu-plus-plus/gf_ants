@@ -6,7 +6,7 @@
 
 constexpr int BLOCK_DIM = 8;
 
-constexpr int GRID_DIM_X = 512;
+constexpr int INVERSE_GRID_DIM_X = 512;
 
 
 
@@ -357,7 +357,6 @@ __global__ void gf_matrix_add(
 			const_v_matrix<T, N> subB(B[m * BLOCK_DIM][n * BLOCK_DIM], BLOCK_DIM, BLOCK_DIM);
 			
             subA[threadIdx.y][threadIdx.x] += subB[threadIdx.y][threadIdx.x];
-            __syncthreads();
 			
         }
     }
