@@ -1,0 +1,5 @@
+*.o
+*.bin
+*.out
+*.txt
+exec_gf
