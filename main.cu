@@ -6,15 +6,16 @@
 
 #define APP_DIM (2048)
 
-constexpr bool PRINT_TOTAL_TIME = false;
-constexpr bool PRINT_VERBOSE = false;
+#define CAPABLE_DIM (512)
+
+constexpr bool PRINT_TOTAL_TIME = true;
+constexpr bool PRINT_VERBOSE = true;
 constexpr bool PRINT_RESULT = false;
 
 
 
 using gf_int_t = gf_int<APP_BITS>;
 
-constexpr int CAPABLE_DIM = 512;
 using capable_t = gf_square<gf_int_t, CAPABLE_DIM>;
 
 
@@ -67,7 +68,9 @@ void init_identify(capable_t *obj) {
 
 
 inline std::string piece(int i, int j) {
-	return std::to_string(i) + "_" + std::to_string(j);
+	return std::to_string(APP_BITS) + "_"
+		+ std::to_string(APP_DIM) + "_"
+		+ std::to_string(i) + "_" + std::to_string(j);
 }
 
 int main(void)
